@@ -1,0 +1,17 @@
+(load "../tls.carp")
+
+; Fetch only the HTTP headers from an HTTPS endpoint.
+;
+; Usage: carp -x examples/headers.carp
+
+(defn main []
+  (match (TlsStream.connect "example.com" 443)
+    (Result.Success s)
+      (do
+        (TlsStream.set-timeout &s 5)
+        (ignore (TlsStream.send &s "HEAD / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n"))
+        (match (the (Result String String) (TlsStream.read &s))
+          (Result.Success body) (println* &body)
+          (Result.Error e) (IO.errorln &e))
+        (TlsStream.close s))
+    (Result.Error e) (IO.errorln &(String.concat &[@"Connection failed: " e]))))

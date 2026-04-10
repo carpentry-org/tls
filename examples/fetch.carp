@@ -1,0 +1,27 @@
+(load "../tls.carp")
+
+; Fetch a page over HTTPS and print the response.
+;
+; Usage: carp -x examples/fetch.carp
+
+(defn read-all [s]
+  (let-do [acc @""
+           done false]
+    (while (not done)
+      (let [chunk (the (Result String String) (TlsStream.read s))]
+        (match chunk
+          (Result.Success data)
+            (if (= (String.length &data) 0)
+              (set! done true)
+              (set! acc (String.concat &[acc data])))
+          (Result.Error _) (set! done true))))
+    acc))
+
+(defn main []
+  (match (TlsStream.connect "example.com" 443)
+    (Result.Success s)
+      (do
+        (ignore (TlsStream.send &s "GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n"))
+        (println* &(read-all &s))
+        (TlsStream.close s))
+    (Result.Error e) (IO.errorln &(String.concat &[@"Connection failed: " e]))))
