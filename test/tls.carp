@@ -10,13 +10,16 @@
 (defn https-get [host path]
   (match (TlsStream.connect host 443)
     (Result.Success s)
-      (let [req (String.concat &[@"GET " @path @" HTTP/1.1\r\nHost: " @host @"\r\nConnection: close\r\n\r\n"])]
-        (do
-          (ignore (TlsStream.send &s &req))
-          (let [resp (the (Result String String) (TlsStream.read &s))]
-            (do
-              (TlsStream.close s)
-              resp))))
+      (let-do [req (String.concat
+                 &[@"GET "
+                   @path
+                   @" HTTP/1.1\r\nHost: "
+                   @host
+                   @"\r\nConnection: close\r\n\r\n"])]
+        (ignore (TlsStream.send &s &req))
+        (let-do [resp (the (Result String String) (TlsStream.read &s))]
+          (TlsStream.close s)
+          resp))
     (Result.Error e) (Result.Error e)))
 
 ; ---------------------------------------------------------------------------
@@ -24,27 +27,23 @@
 ; ---------------------------------------------------------------------------
 
 (deftest test
-
   ; =========================================================================
   ; Connection
   ; =========================================================================
 
   (assert-true test
     (Result.success? &(TlsStream.connect "example.com" 443))
-    "connect to example.com:443 succeeds"
-  )
+    "connect to example.com:443 succeeds")
 
   (assert-true test
     (Result.error? &(TlsStream.connect "localhost" 1))
-    "connect to unreachable address returns error"
-  )
+    "connect to unreachable address returns error")
 
   (assert-true test
     (match (TlsStream.connect "localhost" 1)
       (Result.Error e) (> (String.length &e) 0)
       _ false)
-    "failed connection produces non-empty error message"
-  )
+    "failed connection produces non-empty error message")
 
   ; =========================================================================
   ; Send and read (string)
@@ -54,15 +53,13 @@
     (match (https-get "example.com" "/")
       (Result.Success body) (String.starts-with? &body "HTTP/1.1")
       _ false)
-    "GET request returns HTTP response"
-  )
+    "GET request returns HTTP response")
 
   (assert-true test
     (match (https-get "example.com" "/")
       (Result.Success body) (String.contains-string? &body "200 OK")
       _ false)
-    "GET to example.com returns 200 OK"
-  )
+    "GET to example.com returns 200 OK")
 
   ; =========================================================================
   ; Send and read (bytes)
@@ -72,20 +69,21 @@
     (match (TlsStream.connect "example.com" 443)
       (Result.Success s)
         (let [req "GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n"
-              bytes (Array.copy-map &(fn [c] (Byte.from-int (Char.to-int @c))) &(String.chars req))
+              bytes (Array.copy-map
+                &(fn [c] (Byte.from-int (Char.to-int @c)))
+                &(String.chars req))
               sent (TlsStream.send-bytes &s &bytes)]
           (match sent
             (Result.Success n)
-              (let [resp (the (Result (Array Byte) String) (TlsStream.read-bytes &s))]
-                (do
-                  (TlsStream.close s)
-                  (match resp
-                    (Result.Success data) (> (Array.length &data) 0)
-                    _ false)))
+              (let-do [resp (the (Result (Array Byte) String)
+                                 (TlsStream.read-bytes &s))]
+                (TlsStream.close s)
+                (match resp
+                  (Result.Success data) (> (Array.length &data) 0)
+                  _ false))
             _ (do (TlsStream.close s) false)))
       _ false)
-    "send-bytes and read-bytes roundtrip"
-  )
+    "send-bytes and read-bytes roundtrip")
 
   ; =========================================================================
   ; read-append
@@ -94,19 +92,14 @@
   (assert-true test
     (match (TlsStream.connect "example.com" 443)
       (Result.Success s)
-        (let [req "GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n"]
-          (do
-            (ignore (TlsStream.send &s req))
-            (let [buf (the (Array Byte) (Array.allocate 0))
-                  n (TlsStream.read-append &s &buf)]
-              (do
-                (TlsStream.close s)
-                (match n
-                  (Result.Success count) (> count 0)
-                  _ false)))))
+        (let-do [req "GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n"]
+          (ignore (TlsStream.send &s req))
+          (let-do [buf (the (Array Byte) (Array.allocate 0))
+                   n (TlsStream.read-append &s &buf)]
+            (TlsStream.close s)
+            (match n (Result.Success count) (> count 0) _ false)))
       _ false)
-    "read-append appends data to buffer"
-  )
+    "read-append appends data to buffer")
 
   ; =========================================================================
   ; close!
@@ -114,13 +107,9 @@
 
   (assert-true test
     (match (TlsStream.connect "example.com" 443)
-      (Result.Success s)
-        (do
-          (TlsStream.close! &s)
-          true)
+      (Result.Success s) (do (TlsStream.close! &s) true)
       _ false)
-    "close! by reference does not crash"
-  )
+    "close! by reference does not crash")
 
   ; =========================================================================
   ; set-timeout
@@ -129,13 +118,9 @@
   (assert-true test
     (match (TlsStream.connect "example.com" 443)
       (Result.Success s)
-        (do
-          (TlsStream.set-timeout &s 5)
-          (TlsStream.close s)
-          true)
+        (do (TlsStream.set-timeout &s 5) (TlsStream.close s) true)
       _ false)
-    "set-timeout does not error"
-  )
+    "set-timeout does not error")
 
   ; =========================================================================
   ; Empty read after connection close
@@ -145,22 +130,20 @@
     (match (TlsStream.connect "example.com" 443)
       (Result.Success s)
         (do
-          (ignore (TlsStream.send &s "GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n"))
+          (ignore
+            (TlsStream.send &s
+                            "GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n"))
           ; read until empty (server closes after response)
           (let-do [found false
                    i 0]
-            (while (and (not found) (< i 100))
-              (do
-                (let [r (the (Result String String) (TlsStream.read &s))]
-                  (match r
-                    (Result.Success chunk)
-                      (when (= (String.length &chunk) 0)
-                        (set! found true))
-                    _ ()))
-                (set! i (+ i 1))))
+            (while-do (and (not found) (< i 100))
+              (let [r (the (Result String String) (TlsStream.read &s))]
+                (match r
+                  (Result.Success chunk)
+                    (when (= (String.length &chunk) 0) (set! found true))
+                  _ ()))
+              (set! i (+ i 1)))
             (TlsStream.close s)
             found))
       _ false)
-    "read returns empty string after connection close"
-  )
-)
+    "read returns empty string after connection close"))

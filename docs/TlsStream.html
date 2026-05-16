@@ -33,41 +33,6 @@
                     
                 </div>
                 <div class="binder">
-                    <a class="anchor" href="#TlsStream">
-                        <h3 id="TlsStream">
-                            TlsStream
-                        </h3>
-                    </a>
-                    <div class="description">
-                        meta-stub
-                    </div>
-                    <p class="sig">
-                        a
-                    </p>
-                    <span>
-                        
-                    </span>
-                    <p class="doc">
-                        <p>is a TLS-encrypted TCP stream using OpenSSL.</p>
-<h2>Usage</h2>
-<pre><code>(match (TlsStream.connect &quot;example.com&quot; 443)
-  (Result.Success s)
-    (do
-      (ignore (TlsStream.send &amp;s &quot;GET / HTTP/1.1
-Host: example.com
-Connection: close
-
-&quot;))
-      (match (TlsStream.read &amp;s)
-        (Result.Success msg) (println* &amp;msg)
-        (Result.Error e) (IO.errorln &amp;e))
-      (TlsStream.close s))
-  (Result.Error e) (IO.errorln &amp;e))
-</code></pre>
-
-                    </p>
-                </div>
-                <div class="binder">
                     <a class="anchor" href="#close">
                         <h3 id="close">
                             close

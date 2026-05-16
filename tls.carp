@@ -32,16 +32,22 @@
   (register send- (Fn [&TlsStream &String] Int) "TlsStream_send_")
   (private send-bytes-)
   (hidden send-bytes-)
-  (register send-bytes- (Fn [&TlsStream &(Array Byte)] Int) "TlsStream_send_MINUS_bytes_")
+  (register send-bytes-
+    (Fn [&TlsStream &(Array Byte)] Int)
+    "TlsStream_send_MINUS_bytes_")
   (private read-)
   (hidden read-)
   (register read- (Fn [&TlsStream] String) "TlsStream_read_")
   (private read-bytes-)
   (hidden read-bytes-)
-  (register read-bytes- (Fn [&TlsStream] (Array Byte)) "TlsStream_read_MINUS_bytes_")
+  (register read-bytes-
+    (Fn [&TlsStream] (Array Byte))
+    "TlsStream_read_MINUS_bytes_")
   (private read-append-)
   (hidden read-append-)
-  (register read-append- (Fn [&TlsStream &(Array Byte)] Int) "TlsStream_read_MINUS_append_")
+  (register read-append-
+    (Fn [&TlsStream &(Array Byte)] Int)
+    "TlsStream_read_MINUS_append_")
   (private error-)
   (hidden error-)
   (register error- (Fn [] String) "TlsStream_error_")
@@ -56,48 +62,44 @@
 
   ; -- public API --
 
-  (doc connect "connects to a remote host over TLS. Returns `(Result TlsStream String)`.")
+  (doc connect
+    "connects to a remote host over TLS. Returns `(Result TlsStream String)`.")
   (defn connect [host port]
     (let [s (connect- host port)]
-      (if (= (fd- &s) -1)
-        (Result.Error (error-))
-        (Result.Success s))))
+      (if (= (fd- &s) -1) (Result.Error (error-)) (Result.Success s))))
 
-  (doc send "sends a string over the TLS stream. Returns bytes sent or an error.")
+  (doc send
+    "sends a string over the TLS stream. Returns bytes sent or an error.")
   (defn send [stream msg]
     (let [n (send- stream msg)]
-      (if (= n -1)
-        (Result.Error (error-))
-        (Result.Success n))))
+      (if (= n -1) (Result.Error (error-)) (Result.Success n))))
 
-  (doc send-bytes "sends binary data over the TLS stream. Returns bytes sent or an error.")
+  (doc send-bytes
+    "sends binary data over the TLS stream. Returns bytes sent or an error.")
   (defn send-bytes [stream data]
     (let [n (send-bytes- stream data)]
-      (if (= n -1)
-        (Result.Error (error-))
-        (Result.Success n))))
+      (if (= n -1) (Result.Error (error-)) (Result.Success n))))
 
-  (doc read "reads up to 4096 bytes from the TLS stream. Returns the data as a string.
+  (doc read
+    "reads up to 4096 bytes from the TLS stream. Returns the data as a string.
 Returns an empty string on connection close.")
-  (defn read [stream]
-    (Result.Success (read- stream)))
+  (defn read [stream] (Result.Success (read- stream)))
 
   (doc read-bytes "reads up to 4096 bytes as a byte array.")
-  (defn read-bytes [stream]
-    (Result.Success (read-bytes- stream)))
+  (defn read-bytes [stream] (Result.Success (read-bytes- stream)))
 
-  (doc read-append "reads from the TLS stream and appends to an existing byte buffer.
+  (doc read-append
+    "reads from the TLS stream and appends to an existing byte buffer.
 Returns bytes read (0 = connection closed), or an error.")
   (defn read-append [stream buf]
     (let [n (read-append- stream buf)]
-      (if (= n -1)
-        (Result.Error (error-))
-        (Result.Success n))))
+      (if (= n -1) (Result.Error (error-)) (Result.Success n))))
 
   (register close (Fn [TlsStream] ()))
   (doc close "closes the TLS stream, consuming it. Performs SSL shutdown.")
 
-  (doc close! "closes the TLS stream by reference. Sets fd to -1 to prevent double-close.")
+  (doc close!
+    "closes the TLS stream by reference. Sets fd to -1 to prevent double-close.")
   (register close! (Fn [&TlsStream] ()) "TlsStream_close_MINUS_ref")
 
   (doc set-timeout "sets read and write timeouts in seconds.")
@@ -108,8 +110,9 @@ Returns bytes read (0 = connection closed), or an error.")
 
   (doc with-stream "connects over TLS, executes forms, then closes the stream.")
   (defmacro with-stream [name host port :rest forms]
-    (list 'match (list 'TlsStream.connect host port)
-      (list 'Result.Error 'err) '(Result.Error err)
-      (list 'Result.Success name)
-        (cons-last (list 'TlsStream.close name) (cons 'do forms))))
-)
+    (list 'match
+          (list 'TlsStream.connect host port)
+          (list 'Result.Error 'err)
+          '(Result.Error err)
+          (list 'Result.Success name)
+          (cons-last (list 'TlsStream.close name) (cons 'do forms)))))
