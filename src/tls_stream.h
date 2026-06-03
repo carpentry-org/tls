@@ -5,6 +5,7 @@
 #include <errno.h>
 #include <limits.h>
 #include <netdb.h>
+#include <signal.h>
 #include <netinet/in.h>
 #include <string.h>
 #include <sys/socket.h>
@@ -297,6 +298,10 @@ TlsStream TlsStream_copy(TlsStream *s) {
 }
 
 int TlsStream_init_(void) {
+  /* A write to a peer that has closed/reset the connection otherwise raises
+     SIGPIPE and kills the whole process; ignore it so SSL_write returns an
+     error instead. Runs once at load via the module's auto-init. */
+  signal(SIGPIPE, SIG_IGN);
   return carp_tls_get_client_ctx() != NULL ? 0 : -1;
 }
 
