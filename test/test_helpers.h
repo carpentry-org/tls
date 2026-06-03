@@ -67,6 +67,12 @@ static int carp_test_generate_cert(void) {
   return 0;
 }
 
+/* Generate a self-signed cert/key pair without forking a server.
+   Returns 0 on success, -1 on failure. */
+int carp_test_generate_cert_(void) {
+  return carp_test_generate_cert();
+}
+
 String carp_test_cert_path_(void) {
   size_t len = strlen(carp_test_cert_path);
   String s = CARP_MALLOC(len + 1);
@@ -244,6 +250,10 @@ TlsStream carp_test_connect_insecure(int port) {
 
 void carp_test_cleanup(void) {
   if (carp_test_server_pid > 0) {
+    /* Defensive: kill before reaping so a child stuck in accept() (e.g. a
+       test that forked the server but never connected) cannot deadlock the
+       suite. Harmless if the child has already exited. */
+    kill(carp_test_server_pid, SIGKILL);
     int status;
     waitpid(carp_test_server_pid, &status, 0);
     carp_test_server_pid = -1;

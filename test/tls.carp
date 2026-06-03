@@ -10,6 +10,7 @@
 ; ---------------------------------------------------------------------------
 
 (register test-start-echo-server (Fn [] Int) "carp_test_start_echo_server")
+(register test-generate-cert (Fn [] Int) "carp_test_generate_cert_")
 (register test-connect-insecure
   (Fn [Int] TlsStream)
   "carp_test_connect_insecure")
@@ -168,11 +169,10 @@
   ; =========================================================================
 
   (assert-true test
-    (let [port (test-start-echo-server)
-          cert (test-cert-path)
-          key (test-key-path)]
-      (if (= port -1)
-        false
+    (if (= (test-generate-cert) -1)
+      false
+      (let [cert (test-cert-path)
+            key (test-key-path)]
         (match (TlsServerCtx.create &cert &key)
           (Result.Success ctx) (do (TlsServerCtx.close ctx) (test-cleanup) true)
           _ (do (test-cleanup) false))))
@@ -229,4 +229,24 @@
                       (= (Array.length &data) 5))
                   _ (do (TlsStream.close s) (test-cleanup) false))
               _ (do (TlsStream.close s) (test-cleanup) false))))))
-    "loopback TLS echo: send-bytes and read-bytes roundtrip"))
+    "loopback TLS echo: send-bytes and read-bytes roundtrip")
+
+  ; =========================================================================
+  ; Client verification failure surfaces a captured error message
+  ; =========================================================================
+
+  ; The loopback server presents a self-signed cert. A real client connect
+  ; (SSL_VERIFY_PEER) must reject it, and the error must be captured at the
+  ; failure site (after SSL_free/close) rather than read back as stale state.
+  (assert-true test
+    (let [port (test-start-echo-server)]
+      (if (= port -1)
+        false
+        (let-do [ok (match (TlsStream.connect "localhost" port)
+                   (Result.Error e)
+                     (and (> (String.length &e) 0)
+                          (String.contains-string? &e "certificate"))
+                   (Result.Success s) (do (TlsStream.close s) false))]
+          (test-cleanup)
+          ok)))
+    "client rejects untrusted self-signed cert with a captured error message"))

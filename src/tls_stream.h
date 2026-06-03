@@ -41,21 +41,35 @@ static SSL_CTX *carp_tls_get_client_ctx(void) {
   return ctx;
 }
 
-static String carp_tls_error_string(void) {
+/* Last error message, captured at the failure site (before any SSL_free/close
+   that would reset errno or drain the OpenSSL error queue). Process-global,
+   matching the single-threaded assumption of the rest of the library. */
+static char carp_tls_last_error[256] = {0};
+
+static void carp_tls_set_error(const char *msg) {
+  if (!msg) msg = "unknown error";
+  size_t n = strlen(msg);
+  if (n >= sizeof(carp_tls_last_error)) n = sizeof(carp_tls_last_error) - 1;
+  memcpy(carp_tls_last_error, msg, n);
+  carp_tls_last_error[n] = '\0';
+}
+
+/* Capture the current OpenSSL/system error into carp_tls_last_error. ssl_err is
+   the result of SSL_get_error at the failure site (pass SSL_ERROR_SSL when there
+   is no SSL* yet, e.g. SSL_new / SSL_CTX_* failures). Drains the error queue so
+   a stale entry cannot leak into a later capture. */
+static void carp_tls_capture_ssl_error(int ssl_err) {
   unsigned long e = ERR_get_error();
-  if (e == 0) {
-    const char *msg = strerror(errno);
-    size_t len = strlen(msg);
-    String s = CARP_MALLOC(len + 1);
-    memcpy(s, msg, len + 1);
-    return s;
+  if (e != 0) {
+    ERR_error_string_n(e, carp_tls_last_error, sizeof(carp_tls_last_error));
+  } else if (ssl_err == SSL_ERROR_SYSCALL && errno != 0) {
+    carp_tls_set_error(strerror(errno));
+  } else if (ssl_err == SSL_ERROR_SYSCALL) {
+    carp_tls_set_error("unexpected EOF (no close_notify)");
+  } else {
+    carp_tls_set_error("TLS protocol error");
   }
-  char buf[256];
-  ERR_error_string_n(e, buf, sizeof(buf));
-  size_t len = strlen(buf);
-  String s = CARP_MALLOC(len + 1);
-  memcpy(s, buf, len + 1);
-  return s;
+  ERR_clear_error();
 }
 
 TlsStream TlsStream_connect_(String *host, int port) {
@@ -65,7 +79,10 @@ TlsStream TlsStream_connect_(String *host, int port) {
   s.ctx = NULL;
 
   SSL_CTX *ctx = carp_tls_get_client_ctx();
-  if (!ctx) return s;
+  if (!ctx) {
+    carp_tls_set_error("could not initialize TLS client context");
+    return s;
+  }
 
   /* Resolve and connect TCP */
   struct addrinfo hints, *result, *rp;
@@ -77,7 +94,11 @@ TlsStream TlsStream_connect_(String *host, int port) {
   hints.ai_socktype = SOCK_STREAM;
   hints.ai_flags = AI_ADDRCONFIG;
 
-  if (getaddrinfo(*host, port_str, &hints, &result) != 0) return s;
+  int gai = getaddrinfo(*host, port_str, &hints, &result);
+  if (gai != 0) {
+    carp_tls_set_error(gai_strerror(gai));
+    return s;
+  }
 
   int fd = -1;
   for (rp = result; rp != NULL; rp = rp->ai_next) {
@@ -87,12 +108,17 @@ TlsStream TlsStream_connect_(String *host, int port) {
     close(fd);
     fd = -1;
   }
+  if (fd < 0) carp_tls_set_error(strerror(errno));
   freeaddrinfo(result);
   if (fd < 0) return s;
 
   /* Set up SSL */
   SSL *ssl = SSL_new(ctx);
-  if (!ssl) { close(fd); return s; }
+  if (!ssl) {
+    carp_tls_capture_ssl_error(SSL_ERROR_SSL);
+    close(fd);
+    return s;
+  }
 
   SSL_set_fd(ssl, fd);
   SSL_set_tlsext_host_name(ssl, *host);
@@ -100,7 +126,9 @@ TlsStream TlsStream_connect_(String *host, int port) {
   /* Enable hostname verification */
   SSL_set1_host(ssl, *host);
 
-  if (SSL_connect(ssl) != 1) {
+  int rc = SSL_connect(ssl);
+  if (rc != 1) {
+    carp_tls_capture_ssl_error(SSL_get_error(ssl, rc));
     SSL_free(ssl);
     close(fd);
     return s;
@@ -136,23 +164,43 @@ int TlsStream_send_MINUS_bytes_(TlsStream *s, Array *data) {
   return (int)sent;
 }
 
-String TlsStream_read_(TlsStream *s) {
+/* Classify an SSL_read result <= 0 into a status code:
+   0  = clean shutdown (peer sent close_notify)
+   -1 = error (fatal, syscall, timeout, truncation, ...) */
+static int carp_tls_read_status(SSL *ssl, int r) {
+  int err = SSL_get_error(ssl, r);
+  if (err == SSL_ERROR_ZERO_RETURN) return 0;
+  carp_tls_capture_ssl_error(err);
+  return -1;
+}
+
+/* Reads up to TLS_BUF_SIZE bytes. *status is set to the number of bytes read
+   (> 0), 0 on clean close, or -1 on error. */
+String TlsStream_read_(TlsStream *s, int *status) {
   String buf = CARP_MALLOC(TLS_BUF_SIZE + 1);
   int r = SSL_read(s->ssl, buf, TLS_BUF_SIZE);
-  if (r <= 0) {
-    buf[0] = '\0';
+  if (r > 0) {
+    buf[r] = '\0';
+    *status = r;
     return buf;
   }
-  buf[r] = '\0';
+  buf[0] = '\0';
+  *status = carp_tls_read_status(s->ssl, r);
   return buf;
 }
 
-Array TlsStream_read_MINUS_bytes_(TlsStream *s) {
+Array TlsStream_read_MINUS_bytes_(TlsStream *s, int *status) {
   Array buf;
   buf.capacity = TLS_BUF_SIZE;
   buf.data = CARP_MALLOC(TLS_BUF_SIZE);
   int r = SSL_read(s->ssl, buf.data, TLS_BUF_SIZE);
-  buf.len = r <= 0 ? 0 : r;
+  if (r > 0) {
+    buf.len = r;
+    *status = r;
+    return buf;
+  }
+  buf.len = 0;
+  *status = carp_tls_read_status(s->ssl, r);
   return buf;
 }
 
@@ -163,12 +211,19 @@ int TlsStream_read_MINUS_append_(TlsStream *s, Array *buf) {
     buf->capacity = new_cap;
   }
   int r = SSL_read(s->ssl, (char *)buf->data + buf->len, TLS_BUF_SIZE);
-  if (r > 0) buf->len += r;
-  return r;
+  if (r > 0) {
+    buf->len += r;
+    return r;
+  }
+  return carp_tls_read_status(s->ssl, r);
 }
 
 String TlsStream_error_(void) {
-  return carp_tls_error_string();
+  const char *msg = carp_tls_last_error[0] ? carp_tls_last_error : "unknown error";
+  size_t len = strlen(msg);
+  String s = CARP_MALLOC(len + 1);
+  memcpy(s, msg, len + 1);
+  return s;
 }
 
 void TlsStream_close(TlsStream s) {
@@ -222,24 +277,33 @@ TlsServerCtx TlsServerCtx_create_(String *cert_file, String *key_file) {
   sc.ctx = NULL;
 
   const SSL_METHOD *method = TLS_server_method();
-  if (!method) return sc;
+  if (!method) {
+    carp_tls_set_error("could not create TLS server method");
+    return sc;
+  }
 
   SSL_CTX *ctx = SSL_CTX_new(method);
-  if (!ctx) return sc;
+  if (!ctx) {
+    carp_tls_capture_ssl_error(SSL_ERROR_SSL);
+    return sc;
+  }
 
   SSL_CTX_set_min_proto_version(ctx, TLS1_2_VERSION);
 
   if (SSL_CTX_use_certificate_file(ctx, *cert_file, SSL_FILETYPE_PEM) <= 0) {
+    carp_tls_capture_ssl_error(SSL_ERROR_SSL);
     SSL_CTX_free(ctx);
     return sc;
   }
 
   if (SSL_CTX_use_PrivateKey_file(ctx, *key_file, SSL_FILETYPE_PEM) <= 0) {
+    carp_tls_capture_ssl_error(SSL_ERROR_SSL);
     SSL_CTX_free(ctx);
     return sc;
   }
 
   if (!SSL_CTX_check_private_key(ctx)) {
+    carp_tls_capture_ssl_error(SSL_ERROR_SSL);
     SSL_CTX_free(ctx);
     return sc;
   }
@@ -277,11 +341,16 @@ TlsStream TlsStream_accept_(TlsServerCtx *sc, int fd) {
   s.ctx = sc->ctx;
 
   SSL *ssl = SSL_new(sc->ctx);
-  if (!ssl) return s;
+  if (!ssl) {
+    carp_tls_capture_ssl_error(SSL_ERROR_SSL);
+    return s;
+  }
 
   SSL_set_fd(ssl, fd);
 
-  if (SSL_accept(ssl) != 1) {
+  int rc = SSL_accept(ssl);
+  if (rc != 1) {
+    carp_tls_capture_ssl_error(SSL_get_error(ssl, rc));
     SSL_free(ssl);
     return s;
   }

@@ -22,6 +22,11 @@
                                 TlsStream
                             </a>
                         </li>
+                        <li>
+                            <a href="TlsServerCtx.html">
+                                TlsServerCtx
+                            </a>
+                        </li>
                     </ul>
                 </div>
             </div>
@@ -31,6 +36,27 @@
                 </h1>
                 <div class="module-description">
                     
+                </div>
+                <div class="binder">
+                    <a class="anchor" href="#accept">
+                        <h3 id="accept">
+                            accept
+                        </h3>
+                    </a>
+                    <div class="description">
+                        defn
+                    </div>
+                    <p class="sig">
+                        (Fn [(Ref TlsServerCtx a), Int] (Result TlsStream String))
+                    </p>
+                    <pre class="args">
+                        (accept server-ctx fd)
+                    </pre>
+                    <p class="doc">
+                        <p>wraps an existing TCP file descriptor with a server-side TLS session.
+The fd should come from a TCP accept call. Returns <code>(Result TlsStream String)</code>.</p>
+
+                    </p>
                 </div>
                 <div class="binder">
                     <a class="anchor" href="#close">
@@ -121,14 +147,15 @@
                         defn
                     </div>
                     <p class="sig">
-                        (Fn [(Ref TlsStream a)] (Result String b))
+                        (Fn [(Ref TlsStream a)] (Result String String))
                     </p>
                     <pre class="args">
                         (read stream)
                     </pre>
                     <p class="doc">
                         <p>reads up to 4096 bytes from the TLS stream. Returns the data as a string.
-Returns an empty string on connection close.</p>
+Returns an empty string on a clean connection close, or an error if the read
+failed (timeout, truncation, or a fatal protocol error).</p>
 
                     </p>
                 </div>
@@ -163,13 +190,14 @@ Returns bytes read (0 = connection closed), or an error.</p>
                         defn
                     </div>
                     <p class="sig">
-                        (Fn [(Ref TlsStream a)] (Result (Array Byte) b))
+                        (Fn [(Ref TlsStream a)] (Result (Array Byte) String))
                     </p>
                     <pre class="args">
                         (read-bytes stream)
                     </pre>
                     <p class="doc">
-                        <p>reads up to 4096 bytes as a byte array.</p>
+                        <p>reads up to 4096 bytes as a byte array. Returns an empty array on a clean
+connection close, or an error if the read failed.</p>
 
                     </p>
                 </div>

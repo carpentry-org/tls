@@ -38,11 +38,11 @@
     "TlsStream_send_MINUS_bytes_")
   (private read-)
   (hidden read-)
-  (register read- (Fn [&TlsStream] String) "TlsStream_read_")
+  (register read- (Fn [&TlsStream &Int] String) "TlsStream_read_")
   (private read-bytes-)
   (hidden read-bytes-)
   (register read-bytes-
-    (Fn [&TlsStream] (Array Byte))
+    (Fn [&TlsStream &Int] (Array Byte))
     "TlsStream_read_MINUS_bytes_")
   (private read-append-)
   (hidden read-append-)
@@ -83,11 +83,20 @@
 
   (doc read
     "reads up to 4096 bytes from the TLS stream. Returns the data as a string.
-Returns an empty string on connection close.")
-  (defn read [stream] (Result.Success (read- stream)))
+Returns an empty string on a clean connection close, or an error if the read
+failed (timeout, truncation, or a fatal protocol error).")
+  (defn read [stream]
+    (let [status 0
+          data (read- stream &status)]
+      (if (< status 0) (Result.Error (error-)) (Result.Success data))))
 
-  (doc read-bytes "reads up to 4096 bytes as a byte array.")
-  (defn read-bytes [stream] (Result.Success (read-bytes- stream)))
+  (doc read-bytes
+    "reads up to 4096 bytes as a byte array. Returns an empty array on a clean
+connection close, or an error if the read failed.")
+  (defn read-bytes [stream]
+    (let [status 0
+          data (read-bytes- stream &status)]
+      (if (< status 0) (Result.Error (error-)) (Result.Success data))))
 
   (doc read-append
     "reads from the TLS stream and appends to an existing byte buffer.

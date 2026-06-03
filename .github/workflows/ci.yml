@@ -24,6 +24,15 @@ jobs:
           set -euo pipefail
           carp -b test/tls.carp
 
+      - name: Run tests
+        timeout-minutes: 6
+        run: |
+          set -euo pipefail
+          # carp -x runs the suite; main returns the failure count as the exit
+          # code, so a non-zero exit fails the job. Needs outbound 443 for the
+          # example.com client tests; loopback/server tests are self-contained.
+          carp -x test/tls.carp
+
       - name: Install angler
         run: |
           set -euo pipefail
