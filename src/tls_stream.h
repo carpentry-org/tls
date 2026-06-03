@@ -205,9 +205,17 @@ Array TlsStream_read_MINUS_bytes_(TlsStream *s, int *status) {
 }
 
 int TlsStream_read_MINUS_append_(TlsStream *s, Array *buf) {
-  if ((int)(buf->capacity - buf->len) < TLS_BUF_SIZE) {
-    int new_cap = (buf->len + TLS_BUF_SIZE) * 2;
-    buf->data = CARP_REALLOC(buf->data, new_cap);
+  if (buf->capacity - buf->len < (size_t)TLS_BUF_SIZE) {
+    /* size_t throughout: len/capacity are size_t, so the old int new_cap
+       overflowed once a buffer passed ~2GB, corrupting capacity. */
+    size_t new_cap = (buf->len + (size_t)TLS_BUF_SIZE) * 2;
+    void *grown = CARP_REALLOC(buf->data, new_cap);
+    if (!grown) {
+      /* realloc leaves the original block valid; keep buf intact and report. */
+      carp_tls_set_error("out of memory growing read buffer");
+      return -1;
+    }
+    buf->data = grown;
     buf->capacity = new_cap;
   }
   int r = SSL_read(s->ssl, (char *)buf->data + buf->len, TLS_BUF_SIZE);
