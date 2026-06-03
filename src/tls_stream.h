@@ -209,4 +209,86 @@ int TlsStream_init_(void) {
   return carp_tls_get_client_ctx() != NULL ? 0 : -1;
 }
 
+/* ===================================================================
+   Server-side TLS
+   =================================================================== */
+
+typedef struct {
+  SSL_CTX *ctx;
+} TlsServerCtx;
+
+TlsServerCtx TlsServerCtx_create_(String *cert_file, String *key_file) {
+  TlsServerCtx sc;
+  sc.ctx = NULL;
+
+  const SSL_METHOD *method = TLS_server_method();
+  if (!method) return sc;
+
+  SSL_CTX *ctx = SSL_CTX_new(method);
+  if (!ctx) return sc;
+
+  SSL_CTX_set_min_proto_version(ctx, TLS1_2_VERSION);
+
+  if (SSL_CTX_use_certificate_file(ctx, *cert_file, SSL_FILETYPE_PEM) <= 0) {
+    SSL_CTX_free(ctx);
+    return sc;
+  }
+
+  if (SSL_CTX_use_PrivateKey_file(ctx, *key_file, SSL_FILETYPE_PEM) <= 0) {
+    SSL_CTX_free(ctx);
+    return sc;
+  }
+
+  if (!SSL_CTX_check_private_key(ctx)) {
+    SSL_CTX_free(ctx);
+    return sc;
+  }
+
+  sc.ctx = ctx;
+  return sc;
+}
+
+int TlsServerCtx_valid_(TlsServerCtx *sc) {
+  return sc->ctx != NULL;
+}
+
+void TlsServerCtx_close(TlsServerCtx sc) {
+  if (sc.ctx) SSL_CTX_free(sc.ctx);
+}
+
+void TlsServerCtx_close_MINUS_ref(TlsServerCtx *sc) {
+  if (sc->ctx) {
+    SSL_CTX_free(sc->ctx);
+    sc->ctx = NULL;
+  }
+}
+
+TlsServerCtx TlsServerCtx_copy(TlsServerCtx *sc) {
+  TlsServerCtx c;
+  c.ctx = sc->ctx;
+  if (c.ctx) SSL_CTX_up_ref(c.ctx);
+  return c;
+}
+
+TlsStream TlsStream_accept_(TlsServerCtx *sc, int fd) {
+  TlsStream s;
+  s.fd = -1;
+  s.ssl = NULL;
+  s.ctx = sc->ctx;
+
+  SSL *ssl = SSL_new(sc->ctx);
+  if (!ssl) return s;
+
+  SSL_set_fd(ssl, fd);
+
+  if (SSL_accept(ssl) != 1) {
+    SSL_free(ssl);
+    return s;
+  }
+
+  s.fd = fd;
+  s.ssl = ssl;
+  return s;
+}
+
 #endif

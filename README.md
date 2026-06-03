@@ -59,6 +59,8 @@ macOS with Homebrew: `brew install openssl`.
 
 ## API
 
+### Client
+
 | Function | Purpose |
 |----------|---------|
 | `TlsStream.connect host port` | Open a TLS connection. Returns `(Result TlsStream String)` |
@@ -71,14 +73,39 @@ macOS with Homebrew: `brew install openssl`.
 | `TlsStream.close! &stream` | Close by reference |
 | `TlsStream.set-timeout stream seconds` | Set read/write timeout |
 
+### Server
+
+| Function | Purpose |
+|----------|---------|
+| `TlsServerCtx.create cert-file key-file` | Load PEM cert/key. Returns `(Result TlsServerCtx String)` |
+| `TlsServerCtx.close ctx` | Close, consuming the context |
+| `TlsServerCtx.close! &ctx` | Close by reference |
+| `TlsStream.accept &ctx fd` | Wrap a TCP fd with server-side TLS. Returns `(Result TlsStream String)` |
+
+### Server example
+
+```clojure
+(match (TlsServerCtx.create "cert.pem" "key.pem")
+  (Result.Success ctx)
+    (do
+      ; after accepting a TCP connection (fd from your socket library):
+      (match (TlsStream.accept &ctx client-fd)
+        (Result.Success stream)
+          (do
+            (ignore (TlsStream.send &stream "hello"))
+            (TlsStream.close stream))
+        (Result.Error e) (IO.errorln &e))
+      (TlsServerCtx.close ctx))
+  (Result.Error e) (IO.errorln &e))
+```
+
 All fallible operations return `(Result T String)`.
 
 ## Security defaults
 
 - TLS 1.2 minimum
-- System CA verification enforced (`SSL_VERIFY_PEER`)
-- Hostname verification via `SSL_set1_host`
-- SNI enabled
+- Client: system CA verification enforced (`SSL_VERIFY_PEER`), hostname verification via `SSL_set1_host`, SNI enabled
+- Server: certificate and private key consistency checked on context creation
 
 ## Testing
 
@@ -86,7 +113,8 @@ All fallible operations return `(Result T String)`.
 carp -x test/tls.carp
 ```
 
-The test suite hits `example.com:443` and `localhost:1` (for failure cases).
+The test suite hits `example.com:443` (for client tests), `localhost:1` (for failure
+cases), and runs loopback tests with a self-signed certificate (for server tests).
 
 <hr/>
 

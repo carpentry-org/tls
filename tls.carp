@@ -3,6 +3,7 @@
 (add-pkg "openssl")
 
 (register-type TlsStream)
+(register-type TlsServerCtx)
 
 (doc TlsStream "is a TLS-encrypted TCP stream using OpenSSL.
 
@@ -115,4 +116,66 @@ Returns bytes read (0 = connection closed), or an error.")
           (list 'Result.Error 'err)
           '(Result.Error err)
           (list 'Result.Success name)
-          (cons-last (list 'TlsStream.close name) (cons 'do forms)))))
+          (cons-last (list 'TlsStream.close name) (cons 'do forms))))
+
+  ; -- server-side accept --
+
+  (private accept-)
+  (hidden accept-)
+  (register accept- (Fn [&TlsServerCtx Int] TlsStream) "TlsStream_accept_")
+
+  (doc accept
+    "wraps an existing TCP file descriptor with a server-side TLS session.
+The fd should come from a TCP accept call. Returns `(Result TlsStream String)`.")
+  (defn accept [server-ctx fd]
+    (let [s (accept- server-ctx fd)]
+      (if (= (fd- &s) -1) (Result.Error (error-)) (Result.Success s)))))
+
+(doc TlsServerCtx "is a server-side TLS context that holds a certificate and
+private key. Create one with `TlsServerCtx.create`, then pass it to
+`TlsStream.accept` to wrap incoming TCP connections with TLS.
+
+## Usage
+```
+(match (TlsServerCtx.create \"cert.pem\" \"key.pem\")
+  (Result.Success ctx)
+    (do
+      ; ... accept TCP connections and wrap with TLS ...
+      (match (TlsStream.accept &ctx client-fd)
+        (Result.Success stream) (do (ignore (TlsStream.send &stream \"hello\")) (TlsStream.close stream))
+        (Result.Error e) (IO.errorln &e))
+      (TlsServerCtx.close ctx))
+  (Result.Error e) (IO.errorln &e))
+```")
+
+(defmodule TlsServerCtx
+  ; -- private C bindings --
+  (private create-)
+  (hidden create-)
+  (register create- (Fn [&String &String] TlsServerCtx) "TlsServerCtx_create_")
+  (private valid-)
+  (hidden valid-)
+  (register valid- (Fn [&TlsServerCtx] Int) "TlsServerCtx_valid_")
+  (private error-)
+  (hidden error-)
+  (register error- (Fn [] String) "TlsStream_error_")
+
+  (register close (Fn [TlsServerCtx] ()))
+  (doc close "closes the server context, consuming it. Frees the SSL_CTX.")
+
+  (doc close! "closes the server context by reference. Sets ctx to NULL.")
+  (register close! (Fn [&TlsServerCtx] ()) "TlsServerCtx_close_MINUS_ref")
+
+  (register copy (Fn [&TlsServerCtx] TlsServerCtx))
+  (implements copy TlsServerCtx.copy)
+
+  ; -- public API --
+
+  (doc create
+    "creates a server TLS context from PEM-encoded certificate and key files.
+Returns `(Result TlsServerCtx String)`.")
+  (defn create [cert-file key-file]
+    (let [ctx (create- cert-file key-file)]
+      (if (= (valid- &ctx) 0)
+        (do (close ctx) (Result.Error (error-)))
+        (Result.Success ctx)))))

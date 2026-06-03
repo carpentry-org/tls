@@ -1,7 +1,22 @@
 (load "../tls.carp")
 (load "Test.carp")
 
+(relative-include "test_helpers.h")
+
 (use Test)
+
+; ---------------------------------------------------------------------------
+; Test helper registrations
+; ---------------------------------------------------------------------------
+
+(register test-start-echo-server (Fn [] Int) "carp_test_start_echo_server")
+(register test-connect-insecure
+  (Fn [Int] TlsStream)
+  "carp_test_connect_insecure")
+(register test-stream-ok (Fn [&TlsStream] Int) "carp_test_stream_ok")
+(register test-cleanup (Fn [] ()) "carp_test_cleanup")
+(register test-cert-path (Fn [] String) "carp_test_cert_path_")
+(register test-key-path (Fn [] String) "carp_test_key_path_")
 
 ; ---------------------------------------------------------------------------
 ; Helpers
@@ -146,4 +161,72 @@
             (TlsStream.close s)
             found))
       _ false)
-    "read returns empty string after connection close"))
+    "read returns empty string after connection close")
+
+  ; =========================================================================
+  ; TlsServerCtx
+  ; =========================================================================
+
+  (assert-true test
+    (let [port (test-start-echo-server)
+          cert (test-cert-path)
+          key (test-key-path)]
+      (if (= port -1)
+        false
+        (match (TlsServerCtx.create &cert &key)
+          (Result.Success ctx) (do (TlsServerCtx.close ctx) (test-cleanup) true)
+          _ (do (test-cleanup) false))))
+    "TlsServerCtx.create with valid cert/key succeeds")
+
+  (assert-true test
+    (Result.error?
+      &(TlsServerCtx.create "/nonexistent/cert.pem" "/nonexistent/key.pem"))
+    "TlsServerCtx.create with invalid paths returns error")
+
+  ; =========================================================================
+  ; Loopback: TlsStream.accept echo test
+  ; =========================================================================
+
+  (assert-true test
+    (let [port (test-start-echo-server)]
+      (if (= port -1)
+        false
+        (let [s (test-connect-insecure port)]
+          (if (= (test-stream-ok &s) 0)
+            (do (test-cleanup) false)
+            (let [sent (TlsStream.send &s "hello from carp")]
+              (match sent
+                (Result.Success _n)
+                  (match (the (Result String String) (TlsStream.read &s))
+                    (Result.Success resp)
+                      (do
+                        (TlsStream.close s)
+                        (test-cleanup)
+                        (= &resp "hello from carp"))
+                    _ (do (TlsStream.close s) (test-cleanup) false))
+                _ (do (TlsStream.close s) (test-cleanup) false)))))))
+    "loopback TLS echo: send and receive through server")
+
+  (assert-true test
+    (let [port (test-start-echo-server)]
+      (if (= port -1)
+        false
+        (let [s (test-connect-insecure port)
+              msg "hello"
+              bytes (Array.copy-map
+                &(fn [c] (Byte.from-int (Char.to-int @c)))
+                &(String.chars msg))]
+          (if (= (test-stream-ok &s) 0)
+            (do (test-cleanup) false)
+            (match (TlsStream.send-bytes &s &bytes)
+              (Result.Success _n)
+                (match (the (Result (Array Byte) String)
+                            (TlsStream.read-bytes &s))
+                  (Result.Success data)
+                    (do
+                      (TlsStream.close s)
+                      (test-cleanup)
+                      (= (Array.length &data) 5))
+                  _ (do (TlsStream.close s) (test-cleanup) false))
+              _ (do (TlsStream.close s) (test-cleanup) false))))))
+    "loopback TLS echo: send-bytes and read-bytes roundtrip"))
