@@ -106,6 +106,7 @@ All fallible operations return `(Result T String)`.
 - TLS 1.2 minimum
 - Client: system CA verification enforced (`SSL_VERIFY_PEER`), hostname verification via `SSL_set1_host`, SNI enabled
 - Server: certificate and private key consistency checked on context creation
+- Both: client-initiated renegotiation and TLS-level compression (CRIME) disabled where the OpenSSL build supports the options
 
 ## Testing
 

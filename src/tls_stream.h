@@ -25,6 +25,19 @@ typedef struct {
 /* Shared SSL_CTX for client connections. Initialized once. */
 static SSL_CTX *carp_tls_client_ctx = NULL;
 
+/* Defense-in-depth options applied to every context: disable client-initiated
+   renegotiation (TLS 1.2; TLS 1.3 has none) and TLS-level compression (CRIME,
+   CVE-2012-4929). #ifdef-guarded so this still builds against LibreSSL/older
+   OpenSSL that lack the flags. */
+static void carp_tls_harden_ctx(SSL_CTX *ctx) {
+#ifdef SSL_OP_NO_RENEGOTIATION
+  SSL_CTX_set_options(ctx, SSL_OP_NO_RENEGOTIATION);
+#endif
+#ifdef SSL_OP_NO_COMPRESSION
+  SSL_CTX_set_options(ctx, SSL_OP_NO_COMPRESSION);
+#endif
+}
+
 static SSL_CTX *carp_tls_get_client_ctx(void) {
   if (carp_tls_client_ctx != NULL) return carp_tls_client_ctx;
 
@@ -37,6 +50,7 @@ static SSL_CTX *carp_tls_get_client_ctx(void) {
   SSL_CTX_set_default_verify_paths(ctx);
   SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);
   SSL_CTX_set_min_proto_version(ctx, TLS1_2_VERSION);
+  carp_tls_harden_ctx(ctx);
 
   carp_tls_client_ctx = ctx;
   return ctx;
@@ -311,6 +325,7 @@ TlsServerCtx TlsServerCtx_create_(String *cert_file, String *key_file) {
   }
 
   SSL_CTX_set_min_proto_version(ctx, TLS1_2_VERSION);
+  carp_tls_harden_ctx(ctx);
 
   if (SSL_CTX_use_certificate_file(ctx, *cert_file, SSL_FILETYPE_PEM) <= 0) {
     carp_tls_capture_ssl_error(SSL_ERROR_SSL);
