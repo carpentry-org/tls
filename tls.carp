@@ -38,12 +38,7 @@
     "TlsStream_send_MINUS_bytes_")
   (private read-)
   (hidden read-)
-  (register read- (Fn [&TlsStream &Int] String) "TlsStream_read_")
-  (private read-bytes-)
-  (hidden read-bytes-)
-  (register read-bytes-
-    (Fn [&TlsStream &Int] (Array Byte))
-    "TlsStream_read_MINUS_bytes_")
+  (register read- (Fn [&TlsStream (Ref String)] Int) "TlsStream_read_")
   (private read-append-)
   (hidden read-append-)
   (register read-append-
@@ -83,20 +78,18 @@
 
   (doc read
     "reads up to 4096 bytes from the TLS stream. Returns the data as a string.
-Returns an empty string on a clean connection close, or an error if the read
-failed (timeout, truncation, or a fatal protocol error).")
+Returns an empty string on connection close, or an error on failure.")
   (defn read [stream]
-    (let [status 0
-          data (read- stream &status)]
-      (if (< status 0) (Result.Error (error-)) (Result.Success data))))
+    (let [buf @""
+          n (read- stream &buf)]
+      (if (< n 0) (Result.Error (error-)) (Result.Success buf))))
 
-  (doc read-bytes
-    "reads up to 4096 bytes as a byte array. Returns an empty array on a clean
-connection close, or an error if the read failed.")
+  (doc read-bytes "reads up to 4096 bytes as a byte array.
+Returns an empty array on connection close, or an error on failure.")
   (defn read-bytes [stream]
-    (let [status 0
-          data (read-bytes- stream &status)]
-      (if (< status 0) (Result.Error (error-)) (Result.Success data))))
+    (let [buf (the (Array Byte) (Array.allocate 0))
+          n (read-append- stream &buf)]
+      (if (< n 0) (Result.Error (error-)) (Result.Success buf))))
 
   (doc read-append
     "reads from the TLS stream and appends to an existing byte buffer.
@@ -115,11 +108,6 @@ Returns bytes read (0 = connection closed), or an error.")
   (doc set-timeout "sets read and write timeouts in seconds.")
   (register set-timeout (Fn [&TlsStream Int] ()))
 
-  (doc copy
-    "shallow copy: the result shares the underlying SSL session and socket fd
-with the original. It is a non-owning alias, so close exactly one copy; closing
-more than one double-frees the SSL session. Mirrors `TcpStream` from the socket
-library.")
   (register copy (Fn [&TlsStream] TlsStream))
   (implements copy TlsStream.copy)
 
@@ -140,10 +128,7 @@ library.")
 
   (doc accept
     "wraps an existing TCP file descriptor with a server-side TLS session.
-The fd should come from a TCP accept call. Takes ownership of the fd: on
-success the returned stream closes it (via `close`); on error `accept` closes
-it. Either way, do not close the fd yourself. Returns `(Result TlsStream
-String)`.")
+The fd should come from a TCP accept call. Returns `(Result TlsStream String)`.")
   (defn accept [server-ctx fd]
     (let [s (accept- server-ctx fd)]
       (if (= (fd- &s) -1) (Result.Error (error-)) (Result.Success s)))))
