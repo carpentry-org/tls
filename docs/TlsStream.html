@@ -134,7 +134,11 @@ The fd should come from a TCP accept call. Returns <code>(Result TlsStream Strin
                         
                     </span>
                     <p class="doc">
-                        
+                        <p>shallow copy: the result shares the underlying SSL session and socket fd
+with the original. It is a non-owning alias, so close exactly one copy; closing
+more than one double-frees the SSL session. Mirrors <code>TcpStream</code> from the socket
+library.</p>
+
                     </p>
                 </div>
                 <div class="binder">

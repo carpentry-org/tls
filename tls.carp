@@ -115,6 +115,11 @@ Returns bytes read (0 = connection closed), or an error.")
   (doc set-timeout "sets read and write timeouts in seconds.")
   (register set-timeout (Fn [&TlsStream Int] ()))
 
+  (doc copy
+    "shallow copy: the result shares the underlying SSL session and socket fd
+with the original. It is a non-owning alias, so close exactly one copy; closing
+more than one double-frees the SSL session. Mirrors `TcpStream` from the socket
+library.")
   (register copy (Fn [&TlsStream] TlsStream))
   (implements copy TlsStream.copy)
 
