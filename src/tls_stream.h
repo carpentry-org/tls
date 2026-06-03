@@ -3,6 +3,7 @@
 
 #include <arpa/inet.h>
 #include <errno.h>
+#include <limits.h>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <string.h>
@@ -123,8 +124,14 @@ TlsStream TlsStream_connect_(String *host, int port) {
   SSL_set_fd(ssl, fd);
   SSL_set_tlsext_host_name(ssl, *host);
 
-  /* Enable hostname verification */
-  SSL_set1_host(ssl, *host);
+  /* Enable hostname verification. If this fails we would still trust the chain
+     but skip the name check (fail-open), so bail out instead. */
+  if (SSL_set1_host(ssl, *host) != 1) {
+    carp_tls_set_error("could not enable hostname verification");
+    SSL_free(ssl);
+    close(fd);
+    return s;
+  }
 
   int rc = SSL_connect(ssl);
   if (rc != 1) {
@@ -142,26 +149,33 @@ TlsStream TlsStream_connect_(String *host, int port) {
 
 int TlsStream_fd_(TlsStream *s) { return s->fd; }
 
+/* SSL_write takes an int length, so clamp each call to INT_MAX rather than
+   truncating a size_t remaining into a (possibly negative) int. */
+static int carp_tls_write_chunk(size_t remaining) {
+  return remaining > (size_t)INT_MAX ? INT_MAX : (int)remaining;
+}
+
 int TlsStream_send_(TlsStream *s, String *msg) {
   size_t len = strlen(*msg);
   size_t sent = 0;
   while (sent < len) {
-    int n = SSL_write(s->ssl, *msg + sent, (int)(len - sent));
+    int n = SSL_write(s->ssl, *msg + sent, carp_tls_write_chunk(len - sent));
     if (n <= 0) return -1;
     sent += n;
   }
-  return (int)sent;
+  return sent > (size_t)INT_MAX ? INT_MAX : (int)sent;
 }
 
 int TlsStream_send_MINUS_bytes_(TlsStream *s, Array *data) {
   size_t len = data->len;
   size_t sent = 0;
   while (sent < len) {
-    int n = SSL_write(s->ssl, (char *)data->data + sent, (int)(len - sent));
+    int n = SSL_write(s->ssl, (char *)data->data + sent,
+                      carp_tls_write_chunk(len - sent));
     if (n <= 0) return -1;
     sent += n;
   }
-  return (int)sent;
+  return sent > (size_t)INT_MAX ? INT_MAX : (int)sent;
 }
 
 /* Classify an SSL_read result <= 0 into a status code:
