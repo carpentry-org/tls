@@ -266,6 +266,7 @@ void TlsServerCtx_close_MINUS_ref(TlsServerCtx *sc) {
 TlsServerCtx TlsServerCtx_copy(TlsServerCtx *sc) {
   TlsServerCtx c;
   c.ctx = sc->ctx;
+  if (c.ctx) SSL_CTX_up_ref(c.ctx);
   return c;
 }
 
