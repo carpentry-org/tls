@@ -33,5 +33,5 @@ SNI support.
 Requires OpenSSL (or LibreSSL) installed and discoverable via `pkg-config`.
 On macOS with Homebrew: `brew install openssl`.")
 
-(save-docs TlsStream)
+(save-docs TlsStream TlsServerCtx)
 (quit)
