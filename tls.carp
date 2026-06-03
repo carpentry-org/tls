@@ -140,7 +140,10 @@ library.")
 
   (doc accept
     "wraps an existing TCP file descriptor with a server-side TLS session.
-The fd should come from a TCP accept call. Returns `(Result TlsStream String)`.")
+The fd should come from a TCP accept call. Takes ownership of the fd: on
+success the returned stream closes it (via `close`); on error `accept` closes
+it. Either way, do not close the fd yourself. Returns `(Result TlsStream
+String)`.")
   (defn accept [server-ctx fd]
     (let [s (accept- server-ctx fd)]
       (if (= (fd- &s) -1) (Result.Error (error-)) (Result.Success s)))))

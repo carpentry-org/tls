@@ -54,7 +54,9 @@
                     </pre>
                     <p class="doc">
                         <p>wraps an existing TCP file descriptor with a server-side TLS session.
-The fd should come from a TCP accept call. Returns <code>(Result TlsStream String)</code>.</p>
+The fd should come from a TCP accept call. Takes ownership of the fd: on
+success the returned stream closes it (via <code>close</code>); on error <code>accept</code> closes
+it. Either way, do not close the fd yourself. Returns <code>(Result TlsStream String)</code>.</p>
 
                     </p>
                 </div>

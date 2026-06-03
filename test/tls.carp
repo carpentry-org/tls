@@ -18,6 +18,13 @@
 (register test-cleanup (Fn [] ()) "carp_test_cleanup")
 (register test-cert-path (Fn [] String) "carp_test_cert_path_")
 (register test-key-path (Fn [] String) "carp_test_key_path_")
+(register test-listen (Fn [] Int) "carp_test_listen")
+(register test-get-port (Fn [] Int) "carp_test_get_port")
+(register test-accept-tcp (Fn [Int] Int) "carp_test_accept_tcp")
+(register test-fork-client
+  (Fn [Int &String] Int)
+  "carp_test_fork_insecure_client")
+(register test-close-fd (Fn [Int] ()) "carp_test_close_fd")
 
 ; ---------------------------------------------------------------------------
 ; Helpers
@@ -249,4 +256,41 @@
                    (Result.Success s) (do (TlsStream.close s) false))]
           (test-cleanup)
           ok)))
-    "client rejects untrusted self-signed cert with a captured error message"))
+    "client rejects untrusted self-signed cert with a captured error message")
+
+  ; =========================================================================
+  ; Server: TlsStream.accept end-to-end
+  ; =========================================================================
+
+  ; Carp is the server here: listen, fork an insecure client that sends a
+  ; message, TCP-accept the connection, then wrap it with TlsStream.accept and
+  ; read the message back. Exercises the server accept path directly.
+  (assert-true test
+    (if (= (test-generate-cert) -1)
+      false
+      (let [lfd (test-listen)]
+        (if (< lfd 0)
+          false
+          (let [port (test-get-port)
+                cert (test-cert-path)
+                key (test-key-path)]
+            (match (TlsServerCtx.create &cert &key)
+              (Result.Success ctx)
+                (let-do [_ (test-fork-client port "hello tls accept")
+                         cfd (test-accept-tcp lfd)
+                         ok (match (TlsStream.accept &ctx cfd)
+                           (Result.Success s)
+                             (match (the (Result String String)
+                                         (TlsStream.read &s))
+                               (Result.Success msg)
+                                 (do
+                                   (TlsStream.close s)
+                                   (= &msg "hello tls accept"))
+                               (Result.Error _) (do (TlsStream.close s) false))
+                           (Result.Error _) false)]
+                  (TlsServerCtx.close ctx)
+                  (test-close-fd lfd)
+                  (test-cleanup)
+                  ok)
+              (Result.Error _) (do (test-close-fd lfd) (test-cleanup) false))))))
+    "server accept: wrap a TCP fd with TLS and read a client message"))

@@ -342,6 +342,9 @@ TlsServerCtx TlsServerCtx_copy(TlsServerCtx *sc) {
   return c;
 }
 
+/* Takes ownership of fd: on success the returned stream owns it (closed by
+   TlsStream_close); on failure fd is closed here. Either way the caller must
+   not close fd itself. */
 TlsStream TlsStream_accept_(TlsServerCtx *sc, int fd) {
   TlsStream s;
   s.fd = -1;
@@ -351,6 +354,7 @@ TlsStream TlsStream_accept_(TlsServerCtx *sc, int fd) {
   SSL *ssl = SSL_new(sc->ctx);
   if (!ssl) {
     carp_tls_capture_ssl_error(SSL_ERROR_SSL);
+    close(fd);
     return s;
   }
 
@@ -360,6 +364,7 @@ TlsStream TlsStream_accept_(TlsServerCtx *sc, int fd) {
   if (rc != 1) {
     carp_tls_capture_ssl_error(SSL_get_error(ssl, rc));
     SSL_free(ssl);
+    close(fd);
     return s;
   }
 

@@ -244,6 +244,30 @@ TlsStream carp_test_connect_insecure(int port) {
   return s;
 }
 
+/* Fork a child that connects to `port` over TLS (insecure), sends `msg`, then
+   shuts down and exits. Returns the child pid (reaped by carp_test_cleanup).
+   Used to drive the server-side TlsStream.accept path from Carp. */
+int carp_test_fork_insecure_client(int port, String *msg) {
+  pid_t pid = fork();
+  if (pid < 0) return -1;
+  if (pid == 0) {
+    TlsStream c = carp_test_connect_insecure(port);
+    if (c.fd >= 0) {
+      SSL_write(c.ssl, *msg, (int)strlen(*msg));
+      SSL_shutdown(c.ssl);
+      SSL_free(c.ssl);
+      close(c.fd);
+    }
+    _exit(0);
+  }
+  carp_test_server_pid = pid;
+  return pid;
+}
+
+void carp_test_close_fd(int fd) {
+  if (fd >= 0) close(fd);
+}
+
 /* ---------------------------------------------------------------
    Cleanup
    --------------------------------------------------------------- */
