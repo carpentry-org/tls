@@ -110,8 +110,11 @@ Returns bytes read (0 = connection closed), or an error.")
   (doc set-timeout "sets read and write timeouts in seconds.")
   (register set-timeout (Fn [&TlsStream Int] ()))
 
-  (doc copy "creates a copy of the TLS stream with its own fd (via dup) and an
-incremented SSL reference count. Both copies must be closed independently.")
+  (doc copy
+    "shallow copy: the result shares the underlying SSL session and socket fd
+with the original. It is a non-owning alias, so close exactly one copy; closing
+more than one double-frees the SSL session. Mirrors `TcpStream` from the socket
+library.")
   (register copy (Fn [&TlsStream] TlsStream))
   (implements copy TlsStream.copy)
 

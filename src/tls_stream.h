@@ -217,9 +217,12 @@ int TlsStream_read_(TlsStream *s, String *out) {
 
 int TlsStream_read_MINUS_append_(TlsStream *s, Array *buf) {
   if (buf->capacity - buf->len < (size_t)TLS_BUF_SIZE) {
+    /* size_t throughout: len/capacity are size_t, so the old int new_cap
+       overflowed once a buffer passed ~2GB, corrupting capacity. */
     size_t new_cap = (buf->len + (size_t)TLS_BUF_SIZE) * 2;
     void *grown = CARP_REALLOC(buf->data, new_cap);
     if (!grown) {
+      /* realloc leaves the original block valid; keep buf intact and report. */
       carp_tls_set_error("out of memory growing read buffer");
       return -1;
     }
@@ -270,9 +273,8 @@ void TlsStream_set_MINUS_timeout(TlsStream *s, int seconds) {
 
 TlsStream TlsStream_copy(TlsStream *s) {
   TlsStream c;
-  c.fd = (s->fd >= 0) ? dup(s->fd) : -1;
+  c.fd = s->fd;
   c.ssl = s->ssl;
-  if (c.ssl) SSL_up_ref(c.ssl);
   c.ctx = s->ctx;
   return c;
 }
