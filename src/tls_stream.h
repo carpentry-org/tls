@@ -332,7 +332,7 @@ TlsServerCtx TlsServerCtx_create_(String *cert_file, String *key_file) {
   SSL_CTX_set_min_proto_version(ctx, TLS1_2_VERSION);
   carp_tls_harden_ctx(ctx);
 
-  if (SSL_CTX_use_certificate_file(ctx, *cert_file, SSL_FILETYPE_PEM) <= 0) {
+  if (SSL_CTX_use_certificate_chain_file(ctx, *cert_file) <= 0) {
     carp_tls_capture_ssl_error(SSL_ERROR_SSL);
     SSL_CTX_free(ctx);
     return sc;
