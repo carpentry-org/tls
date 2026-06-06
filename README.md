@@ -72,6 +72,10 @@ macOS with Homebrew: `brew install openssl`.
 | `TlsStream.close stream` | Close, consuming the stream |
 | `TlsStream.close! &stream` | Close by reference |
 | `TlsStream.set-timeout stream seconds` | Set read/write timeout |
+| `TlsStream.set-nonblocking stream` | Put the socket into non-blocking mode |
+| `TlsStream.send-nb stream data offset` | Non-blocking send from byte array at offset. Returns 0 on would-block |
+| `TlsStream.read-append-nb stream buf` | Non-blocking read-append. Returns -2 (`read-blocked`) on would-block |
+| `TlsStream.read-blocked` | Sentinel value (-2) for would-block |
 
 ### Server
 

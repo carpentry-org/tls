@@ -11,6 +11,7 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <fcntl.h>
 
 #include <openssl/ssl.h>
 #include <openssl/err.h>
@@ -287,6 +288,65 @@ void TlsStream_set_MINUS_timeout(TlsStream *s, int seconds) {
   struct timeval tv = { .tv_sec = seconds, .tv_usec = 0 };
   setsockopt(s->fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
   setsockopt(s->fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+}
+
+void TlsStream_set_MINUS_nonblocking(TlsStream *s) {
+  int flags = fcntl(s->fd, F_GETFL, 0);
+  if (flags >= 0) fcntl(s->fd, F_SETFL, flags | O_NONBLOCK);
+}
+
+/* Non-blocking send. Attempts a single SSL_write from `data` starting at
+ * `offset`. Handles SSL_ERROR_WANT_WRITE and SSL_ERROR_WANT_READ (TLS
+ * renegotiation) by returning 0 (would-block).
+ *
+ * Returns:
+ *   > 0  bytes actually written
+ *     0  would block, retry on next writable/readable event
+ *   -1   error (captured in carp_tls_last_error)
+ */
+int TlsStream_send_MINUS_nb_(TlsStream *s, Array *data, int offset) {
+  if (offset >= (int)data->len) return 0;
+  int n = SSL_write(s->ssl, (char *)data->data + offset,
+                    carp_tls_write_chunk(data->len - (size_t)offset));
+  if (n > 0) return n;
+  int err = SSL_get_error(s->ssl, n);
+  if (err == SSL_ERROR_WANT_WRITE || err == SSL_ERROR_WANT_READ) return 0;
+  carp_tls_capture_ssl_error(err);
+  return -1;
+}
+
+/* Non-blocking append-read. Reads whatever SSL has buffered/available into
+ * `buf`, growing it as needed. Handles SSL_ERROR_WANT_READ and
+ * SSL_ERROR_WANT_WRITE by returning -2 (would-block sentinel matching the
+ * sockets library convention).
+ *
+ * Returns:
+ *   > 0  bytes appended
+ *     0  peer closed cleanly (close_notify)
+ *   -1   error (captured in carp_tls_last_error)
+ *   -2   would block, retry on next readable/writable event
+ */
+int TlsStream_read_MINUS_append_MINUS_nb_(TlsStream *s, Array *buf) {
+  if (buf->capacity - buf->len < (size_t)TLS_BUF_SIZE) {
+    size_t new_cap = (buf->len + (size_t)TLS_BUF_SIZE) * 2;
+    void *grown = CARP_REALLOC(buf->data, new_cap);
+    if (!grown) {
+      carp_tls_set_error("out of memory growing read buffer");
+      return -1;
+    }
+    buf->data = grown;
+    buf->capacity = new_cap;
+  }
+  int r = SSL_read(s->ssl, (char *)buf->data + buf->len, TLS_BUF_SIZE);
+  if (r > 0) {
+    buf->len += r;
+    return r;
+  }
+  int err = SSL_get_error(s->ssl, r);
+  if (err == SSL_ERROR_ZERO_RETURN) return 0;
+  if (err == SSL_ERROR_WANT_READ || err == SSL_ERROR_WANT_WRITE) return -2;
+  carp_tls_capture_ssl_error(err);
+  return -1;
 }
 
 TlsStream TlsStream_copy(TlsStream *s) {

@@ -132,6 +132,53 @@ library.")
           (list 'Result.Success name)
           (cons-last (list 'TlsStream.close name) (cons 'do forms))))
 
+  ; -- non-blocking I/O --
+
+  (doc set-nonblocking "puts the underlying socket into non-blocking mode.
+After this call, `send-nb` and `read-append-nb` are the appropriate I/O
+entry points; the blocking variants do not handle would-block correctly.")
+  (register set-nonblocking (Fn [&TlsStream] ()))
+
+  (private send-nb-)
+  (hidden send-nb-)
+  (register send-nb-
+    (Fn [&TlsStream &(Array Byte) Int] Int)
+    "TlsStream_send_MINUS_nb_")
+
+  (doc send-nb "non-blocking send. Sends as many bytes as TLS will accept
+right now from `data`, starting at `offset`.
+
+Returns `(Result Int String)`. The `Int` is the number of bytes actually
+written, which may be `0` if the socket is not currently writable (including
+TLS renegotiation). Re-arm write interest on the next event-loop iteration
+in that case.")
+  (defn send-nb [stream data offset]
+    (let [n (send-nb- stream data offset)]
+      (if (= n -1) (Result.Error (error-)) (Result.Success n))))
+
+  (private read-append-nb-)
+  (hidden read-append-nb-)
+  (register read-append-nb-
+    (Fn [&TlsStream &(Array Byte)] Int)
+    "TlsStream_read_MINUS_append_MINUS_nb_")
+
+  (doc read-blocked "sentinel returned by `read-append-nb` when no data is
+currently available on a non-blocking socket.")
+  (def read-blocked -2)
+
+  (doc read-append-nb "non-blocking append-read. Reads whatever data TLS has
+available into `buf`, growing it as needed.
+
+Returns `(Result Int String)`. The `Int` is one of:
+
+- `> 0` bytes appended to `buf`,
+- `0` peer closed cleanly (EOF),
+- `read-blocked` (-2) socket has no data right now, retry on the next
+  readable event.")
+  (defn read-append-nb [stream buf]
+    (let [n (read-append-nb- stream buf)]
+      (if (= n -1) (Result.Error (error-)) (Result.Success n))))
+
   ; -- server-side accept --
 
   (private accept-)

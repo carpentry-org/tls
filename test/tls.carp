@@ -293,4 +293,61 @@
                   (test-cleanup)
                   ok)
               (Result.Error _) (do (test-close-fd lfd) (test-cleanup) false))))))
-    "server accept: wrap a TCP fd with TLS and read a client message"))
+    "server accept: wrap a TCP fd with TLS and read a client message")
+
+  ; =========================================================================
+  ; Non-blocking I/O
+  ; =========================================================================
+
+  ; Loopback: set-nonblocking + send-nb + read-append-nb
+  (assert-true test
+    (let [port (test-start-echo-server)]
+      (if (= port -1)
+        false
+        (let [s (test-connect-insecure port)]
+          (if (= (test-stream-ok &s) 0)
+            (do (test-cleanup) false)
+            (let-do [msg "nonblocking echo"
+                     bytes (Array.copy-map
+                       &(fn [c] (Byte.from-int (Char.to-int @c)))
+                       &(String.chars msg))]
+              (TlsStream.set-nonblocking &s)
+              ; send-nb: write all bytes (loopback, small message, should go in one call)
+              (let [ok (match (TlsStream.send-nb &s &bytes 0)
+                      (Result.Success n)
+                        (if (> n 0)
+                          ; read-append-nb: may need to retry if WANT_READ
+                          (let-do [buf (the (Array Byte) (Array.allocate 0))
+                                   got 0
+                                   tries 0]
+                            (while-do (and (= got 0) (< tries 1000000))
+                              (match (TlsStream.read-append-nb &s &buf)
+                                (Result.Success k) (when (> k 0) (set! got k))
+                                _ ())
+                              (set! tries (+ tries 1)))
+                            (TlsStream.close s)
+                            (test-cleanup)
+                            (and (> got 0)
+                                 (= (Array.length &buf) (String.length msg))))
+                          (do (TlsStream.close s) (test-cleanup) false))
+                      _ (do (TlsStream.close s) (test-cleanup) false))]
+                ok))))))
+    "non-blocking loopback: send-nb and read-append-nb roundtrip")
+
+  ; read-blocked sentinel is -2
+  (assert-equal test -2 TlsStream.read-blocked "read-blocked sentinel is -2")
+
+  ; set-nonblocking does not crash on a valid stream
+  (assert-true test
+    (let [port (test-start-echo-server)]
+      (if (= port -1)
+        false
+        (let [s (test-connect-insecure port)]
+          (if (= (test-stream-ok &s) 0)
+            (do (test-cleanup) false)
+            (do
+              (TlsStream.set-nonblocking &s)
+              (TlsStream.close s)
+              (test-cleanup)
+              true)))))
+    "set-nonblocking does not crash on a valid stream"))
