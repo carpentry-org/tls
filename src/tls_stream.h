@@ -176,7 +176,10 @@ int TlsStream_send_(TlsStream *s, String *msg) {
   size_t sent = 0;
   while (sent < len) {
     int n = SSL_write(s->ssl, *msg + sent, carp_tls_write_chunk(len - sent));
-    if (n <= 0) return -1;
+    if (n <= 0) {
+      carp_tls_capture_ssl_error(SSL_get_error(s->ssl, n));
+      return -1;
+    }
     sent += n;
   }
   return sent > (size_t)INT_MAX ? INT_MAX : (int)sent;
@@ -188,7 +191,10 @@ int TlsStream_send_MINUS_bytes_(TlsStream *s, Array *data) {
   while (sent < len) {
     int n = SSL_write(s->ssl, (char *)data->data + sent,
                       carp_tls_write_chunk(len - sent));
-    if (n <= 0) return -1;
+    if (n <= 0) {
+      carp_tls_capture_ssl_error(SSL_get_error(s->ssl, n));
+      return -1;
+    }
     sent += n;
   }
   return sent > (size_t)INT_MAX ? INT_MAX : (int)sent;
