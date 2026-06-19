@@ -96,7 +96,7 @@ it. Either way, do not close the fd yourself. Returns <code>(Result TlsStream St
                         
                     </span>
                     <p class="doc">
-                        <p>closes the TLS stream by reference. Sets fd to -1 to prevent double-close.</p>
+                        <p>closes the TLS stream by reference. Safe against double-close.</p>
 
                     </p>
                 </div>
@@ -187,6 +187,55 @@ Returns bytes read (0 = connection closed), or an error.</p>
                     </p>
                 </div>
                 <div class="binder">
+                    <a class="anchor" href="#read-append-nb">
+                        <h3 id="read-append-nb">
+                            read-append-nb
+                        </h3>
+                    </a>
+                    <div class="description">
+                        defn
+                    </div>
+                    <p class="sig">
+                        (Fn [(Ref TlsStream a), (Ref (Array Byte) b)] (Result Int String))
+                    </p>
+                    <pre class="args">
+                        (read-append-nb stream buf)
+                    </pre>
+                    <p class="doc">
+                        <p>non-blocking append-read. Reads whatever data TLS has
+available into <code>buf</code>, growing it as needed.</p>
+<p>Returns <code>(Result Int String)</code>. The <code>Int</code> is one of:</p>
+<ul>
+<li><code>&gt; 0</code> bytes appended to <code>buf</code>,</li>
+<li><code>0</code> peer closed cleanly (EOF),</li>
+<li><code>read-blocked</code> (-2) socket has no data right now, retry on the next
+readable event.</li>
+</ul>
+
+                    </p>
+                </div>
+                <div class="binder">
+                    <a class="anchor" href="#read-blocked">
+                        <h3 id="read-blocked">
+                            read-blocked
+                        </h3>
+                    </a>
+                    <div class="description">
+                        def
+                    </div>
+                    <p class="sig">
+                        Int
+                    </p>
+                    <span>
+                        
+                    </span>
+                    <p class="doc">
+                        <p>sentinel returned by <code>read-append-nb</code> when no data is
+currently available on a non-blocking socket.</p>
+
+                    </p>
+                </div>
+                <div class="binder">
                     <a class="anchor" href="#read-bytes">
                         <h3 id="read-bytes">
                             read-bytes
@@ -244,6 +293,53 @@ connection close, or an error if the read failed.</p>
                     </pre>
                     <p class="doc">
                         <p>sends binary data over the TLS stream. Returns bytes sent or an error.</p>
+
+                    </p>
+                </div>
+                <div class="binder">
+                    <a class="anchor" href="#send-nb">
+                        <h3 id="send-nb">
+                            send-nb
+                        </h3>
+                    </a>
+                    <div class="description">
+                        defn
+                    </div>
+                    <p class="sig">
+                        (Fn [(Ref TlsStream a), (Ref (Array Byte) b), Int] (Result Int String))
+                    </p>
+                    <pre class="args">
+                        (send-nb stream data offset)
+                    </pre>
+                    <p class="doc">
+                        <p>non-blocking send. Sends as many bytes as TLS will accept
+right now from <code>data</code>, starting at <code>offset</code>.</p>
+<p>Returns <code>(Result Int String)</code>. The <code>Int</code> is the number of bytes actually
+written, which may be <code>0</code> if the socket is not currently writable (including
+TLS renegotiation). Re-arm write interest on the next event-loop iteration
+in that case.</p>
+
+                    </p>
+                </div>
+                <div class="binder">
+                    <a class="anchor" href="#set-nonblocking">
+                        <h3 id="set-nonblocking">
+                            set-nonblocking
+                        </h3>
+                    </a>
+                    <div class="description">
+                        external
+                    </div>
+                    <p class="sig">
+                        (Fn [(Ref TlsStream a)] ())
+                    </p>
+                    <span>
+                        
+                    </span>
+                    <p class="doc">
+                        <p>puts the underlying socket into non-blocking mode.
+After this call, <code>send-nb</code> and <code>read-append-nb</code> are the appropriate I/O
+entry points; the blocking variants do not handle would-block correctly.</p>
 
                     </p>
                 </div>

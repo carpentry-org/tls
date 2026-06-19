@@ -21,7 +21,6 @@
 ```")
 
 (defmodule TlsStream
-  ; -- private C bindings --
   (private connect-)
   (hidden connect-)
   (register connect- (Fn [&String Int] TlsStream) "TlsStream_connect_")
@@ -56,12 +55,9 @@
   (hidden init-)
   (register init- (Fn [] Int) "TlsStream_init_")
 
-  ; -- auto-initialize OpenSSL on load --
   (hidden _)
   (private _)
   (def _ (do (ignore (TlsStream.init-)) 0))
-
-  ; -- public API --
 
   (doc connect
     "connects to a remote host over TLS. Returns `(Result TlsStream String)`.")
@@ -109,7 +105,7 @@ Returns bytes read (0 = connection closed), or an error.")
   (doc close "closes the TLS stream, consuming it. Performs SSL shutdown.")
 
   (doc close!
-    "closes the TLS stream by reference. Sets fd to -1 to prevent double-close.")
+    "closes the TLS stream by reference. Safe against double-close.")
   (register close! (Fn [&TlsStream] ()) "TlsStream_close_MINUS_ref")
 
   (doc set-timeout "sets read and write timeouts in seconds.")
@@ -131,8 +127,6 @@ library.")
           '(Result.Error err)
           (list 'Result.Success name)
           (cons-last (list 'TlsStream.close name) (cons 'do forms))))
-
-  ; -- non-blocking I/O --
 
   (doc set-nonblocking "puts the underlying socket into non-blocking mode.
 After this call, `send-nb` and `read-append-nb` are the appropriate I/O
@@ -179,8 +173,6 @@ Returns `(Result Int String)`. The `Int` is one of:
     (let [n (read-append-nb- stream buf)]
       (if (= n -1) (Result.Error (error-)) (Result.Success n))))
 
-  ; -- server-side accept --
-
   (private accept-)
   (hidden accept-)
   (register accept- (Fn [&TlsServerCtx Int] TlsStream) "TlsStream_accept_")
@@ -213,7 +205,6 @@ private key. Create one with `TlsServerCtx.create`, then pass it to
 ```")
 
 (defmodule TlsServerCtx
-  ; -- private C bindings --
   (private create-)
   (hidden create-)
   (register create- (Fn [&String &String] TlsServerCtx) "TlsServerCtx_create_")
@@ -227,13 +218,11 @@ private key. Create one with `TlsServerCtx.create`, then pass it to
   (register close (Fn [TlsServerCtx] ()))
   (doc close "closes the server context, consuming it. Frees the SSL_CTX.")
 
-  (doc close! "closes the server context by reference. Sets ctx to NULL.")
+  (doc close! "closes the server context by reference. Safe against double-close.")
   (register close! (Fn [&TlsServerCtx] ()) "TlsServerCtx_close_MINUS_ref")
 
   (register copy (Fn [&TlsServerCtx] TlsServerCtx))
   (implements copy TlsServerCtx.copy)
-
-  ; -- public API --
 
   (doc create
     "creates a server TLS context from PEM-encoded certificate and key files.
