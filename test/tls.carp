@@ -38,7 +38,6 @@
     (Result.Error e) (Result.Error e)))
 
 (deftest test
-
   (assert-true test
     (Result.success? &(TlsStream.connect "example.com" 443))
     "connect to example.com:443 succeeds")
@@ -249,25 +248,23 @@
                        &(fn [c] (Byte.from-int (Char.to-int @c)))
                        &(String.chars msg))]
               (TlsStream.set-nonblocking &s)
-              (let [ok (match (TlsStream.send-nb &s &bytes 0)
-                      (Result.Success n)
-                        (if (> n 0)
-                          ; read-append-nb: may need to retry if WANT_READ
-                          (let-do [buf (the (Array Byte) (Array.allocate 0))
-                                   got 0
-                                   tries 0]
-                            (while-do (and (= got 0) (< tries 1000000))
-                              (match (TlsStream.read-append-nb &s &buf)
-                                (Result.Success k) (when (> k 0) (set! got k))
-                                _ ())
-                              (set! tries (+ tries 1)))
-                            (TlsStream.close s)
-                            (test-cleanup)
-                            (and (> got 0)
-                                 (= (Array.length &buf) (String.length msg))))
-                          (do (TlsStream.close s) (test-cleanup) false))
-                      _ (do (TlsStream.close s) (test-cleanup) false))]
-                ok))))))
+              (match (TlsStream.send-nb &s &bytes 0)
+                (Result.Success n)
+                  (if (> n 0)
+                    ; read-append-nb: may need to retry if WANT_READ
+                    (let-do [buf (the (Array Byte) (Array.allocate 0))
+                             got 0
+                             tries 0]
+                      (while-do (and (= got 0) (< tries 1000000))
+                        (match (TlsStream.read-append-nb &s &buf)
+                          (Result.Success k) (when (> k 0) (set! got k))
+                          _ ())
+                        (set! tries (+ tries 1)))
+                      (TlsStream.close s)
+                      (test-cleanup)
+                      (and (> got 0) (= (Array.length &buf) (String.length msg))))
+                    (do (TlsStream.close s) (test-cleanup) false))
+                _ (do (TlsStream.close s) (test-cleanup) false)))))))
     "non-blocking loopback: send-nb and read-append-nb roundtrip")
 
   (assert-equal test -2 TlsStream.read-blocked "read-blocked sentinel is -2")

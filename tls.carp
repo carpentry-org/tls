@@ -104,8 +104,7 @@ Returns bytes read (0 = connection closed), or an error.")
   (register close (Fn [TlsStream] ()))
   (doc close "closes the TLS stream, consuming it. Performs SSL shutdown.")
 
-  (doc close!
-    "closes the TLS stream by reference. Safe against double-close.")
+  (doc close! "closes the TLS stream by reference. Safe against double-close.")
   (register close! (Fn [&TlsStream] ()) "TlsStream_close_MINUS_ref")
 
   (doc set-timeout "sets read and write timeouts in seconds.")
@@ -218,7 +217,8 @@ private key. Create one with `TlsServerCtx.create`, then pass it to
   (register close (Fn [TlsServerCtx] ()))
   (doc close "closes the server context, consuming it. Frees the SSL_CTX.")
 
-  (doc close! "closes the server context by reference. Safe against double-close.")
+  (doc close!
+    "closes the server context by reference. Safe against double-close.")
   (register close! (Fn [&TlsServerCtx] ()) "TlsServerCtx_close_MINUS_ref")
 
   (register copy (Fn [&TlsServerCtx] TlsServerCtx))
