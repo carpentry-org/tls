@@ -7,7 +7,7 @@ encrypted TCP stream with an API that mirrors
 ## Installation
 
 ```clojure
-(load "git@github.com:carpentry-org/tls@0.0.1")
+(load "git@github.com:carpentry-org/tls@0.2.0")
 ```
 
 Requires OpenSSL (or LibreSSL) installed and discoverable via `pkg-config`. On
