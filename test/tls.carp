@@ -37,6 +37,17 @@
           resp))
     (Result.Error e) (Result.Error e)))
 
+; Names the stage `connect-classified` reported, so a wrong stage reads
+; differently from a failure to classify at all.
+(defn tls-connect-kind [host port]
+  (match (TlsStream.connect-classified host port)
+    (Result.Success s) (do (TlsStream.close s) @"connected")
+    (Result.Error e)
+      (match e
+        (TlsError.Resolve _) @"resolve"
+        (TlsError.Connect _) @"connect"
+        (TlsError.Handshake _) @"handshake")))
+
 (deftest test
   (assert-true test
     (Result.success? &(TlsStream.connect "example.com" 443))
@@ -205,6 +216,30 @@
           (test-cleanup)
           ok)))
     "client rejects untrusted self-signed cert with a captured error message")
+
+  ; The same rejection, named as a stage. A handshake failure is the one kind
+  ; that says the host was reached, so retrying it is pointless.
+  (assert-equal test
+    "handshake"
+    &(let [port (test-start-echo-server)]
+      (if (= port -1)
+        @"no server"
+        (let-do [kind (tls-connect-kind "localhost" port)] (test-cleanup) kind)))
+    "a rejected certificate is a Handshake error")
+
+  ; A label with a space is not a legal host name, so this fails in the stub
+  ; resolver and needs no network.
+  (assert-equal test
+    "resolve"
+    &(tls-connect-kind "a b c" 443)
+    "a host name that cannot resolve is a Resolve error")
+
+  ; Port 9 (discard) on loopback, with nothing bound: the name resolves and
+  ; the connection is refused, before any TLS happens.
+  (assert-equal test
+    "connect"
+    &(tls-connect-kind "127.0.0.1" 9)
+    "a resolvable host that refuses is a Connect error")
 
   (assert-true test
     (if (= (test-generate-cert) -1)

@@ -63,6 +63,16 @@ static SSL_CTX *carp_tls_get_client_ctx(void) {
    matching the single-threaded assumption of the rest of the library. */
 static char carp_tls_last_error[256] = {0};
 
+/* Which stage of TlsStream_connect_ produced carp_tls_last_error. The stages
+   fail for unrelated reasons -- a name that does not resolve, a host that
+   refuses, a certificate that does not verify -- and only the message tells
+   them apart otherwise, which callers cannot match on. */
+#define CARP_TLS_STAGE_NONE 0
+#define CARP_TLS_STAGE_RESOLVE 1
+#define CARP_TLS_STAGE_CONNECT 2
+#define CARP_TLS_STAGE_HANDSHAKE 3
+static int carp_tls_last_stage = CARP_TLS_STAGE_NONE;
+
 static void carp_tls_set_error(const char *msg) {
   if (!msg) msg = "unknown error";
   size_t n = strlen(msg);
@@ -95,8 +105,11 @@ TlsStream TlsStream_connect_(String *host, int port) {
   s.ssl = NULL;
   s.ctx = NULL;
 
+  carp_tls_last_stage = CARP_TLS_STAGE_NONE;
+
   SSL_CTX *ctx = carp_tls_get_client_ctx();
   if (!ctx) {
+    carp_tls_last_stage = CARP_TLS_STAGE_HANDSHAKE;
     carp_tls_set_error("could not initialize TLS client context");
     return s;
   }
@@ -113,6 +126,7 @@ TlsStream TlsStream_connect_(String *host, int port) {
 
   int gai = getaddrinfo(*host, port_str, &hints, &result);
   if (gai != 0) {
+    carp_tls_last_stage = CARP_TLS_STAGE_RESOLVE;
     carp_tls_set_error(gai_strerror(gai));
     return s;
   }
@@ -125,13 +139,17 @@ TlsStream TlsStream_connect_(String *host, int port) {
     close(fd);
     fd = -1;
   }
-  if (fd < 0) carp_tls_set_error(strerror(errno));
+  if (fd < 0) {
+    carp_tls_last_stage = CARP_TLS_STAGE_CONNECT;
+    carp_tls_set_error(strerror(errno));
+  }
   freeaddrinfo(result);
   if (fd < 0) return s;
 
   /* Set up SSL */
   SSL *ssl = SSL_new(ctx);
   if (!ssl) {
+    carp_tls_last_stage = CARP_TLS_STAGE_HANDSHAKE;
     carp_tls_capture_ssl_error(SSL_ERROR_SSL);
     close(fd);
     return s;
@@ -143,6 +161,7 @@ TlsStream TlsStream_connect_(String *host, int port) {
   /* Enable hostname verification. If this fails we would still trust the chain
      but skip the name check (fail-open), so bail out instead. */
   if (SSL_set1_host(ssl, *host) != 1) {
+    carp_tls_last_stage = CARP_TLS_STAGE_HANDSHAKE;
     carp_tls_set_error("could not enable hostname verification");
     SSL_free(ssl);
     close(fd);
@@ -151,6 +170,7 @@ TlsStream TlsStream_connect_(String *host, int port) {
 
   int rc = SSL_connect(ssl);
   if (rc != 1) {
+    carp_tls_last_stage = CARP_TLS_STAGE_HANDSHAKE;
     carp_tls_capture_ssl_error(SSL_get_error(ssl, rc));
     SSL_free(ssl);
     close(fd);
@@ -164,6 +184,9 @@ TlsStream TlsStream_connect_(String *host, int port) {
 }
 
 int TlsStream_fd_(TlsStream *s) { return s->fd; }
+
+/* The stage the last TlsStream_connect_ failed at; 0 if it did not fail. */
+int TlsStream_connect_MINUS_stage_(void) { return carp_tls_last_stage; }
 
 /* SSL_write takes an int length, so clamp each call to INT_MAX rather than
    truncating a size_t remaining into a (possibly negative) int. */

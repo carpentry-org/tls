@@ -5,6 +5,42 @@
 (register-type TlsStream)
 (register-type TlsServerCtx)
 
+(doc TlsError "says which stage of a TLS connection attempt failed.
+
+`Resolve` is the host name, `Connect` is the TCP connection to a resolved
+address, and `Handshake` is everything OpenSSL does afterwards, including
+certificate and host name verification. Only `Resolve` and `Connect` say
+anything about reaching the host; a `Handshake` failure means it was reached
+and the session could not be established.")
+(deftype TlsError
+  (Resolve [String])
+  (Connect [String])
+  (Handshake [String]))
+
+(defmodule TlsError
+  (doc message "returns the underlying error text, whichever stage failed.")
+  (defn message [e]
+    (match-ref e
+      (TlsError.Resolve m) @m
+      (TlsError.Connect m) @m
+      (TlsError.Handshake m) @m))
+
+  (doc reached-host? "whether the host was reached before the failure, which
+is what separates a handshake failure from a connection failure.")
+  (defn reached-host? [e]
+    (match-ref e
+      (TlsError.Resolve _) false
+      (TlsError.Connect _) false
+      (TlsError.Handshake _) true))
+
+  (doc str "formats a `TlsError` as a human-readable string.")
+  (defn str [e]
+    (match-ref e
+      (TlsError.Resolve m) (fmt "cannot resolve host: %s" m)
+      (TlsError.Connect m) (fmt "cannot connect: %s" m)
+      (TlsError.Handshake m) (fmt "TLS handshake failed: %s" m)))
+  (implements str TlsError.str))
+
 (doc TlsStream "is a TLS-encrypted TCP stream using OpenSSL.
 
 ## Usage
@@ -59,11 +95,42 @@
   (private _)
   (def _ (do (ignore (TlsStream.init-)) 0))
 
-  (doc connect
-    "connects to a remote host over TLS. Returns `(Result TlsStream String)`.")
-  (defn connect [host port]
+  (private connect-stage-)
+  (hidden connect-stage-)
+  (register connect-stage- (Fn [] Int) "TlsStream_connect_MINUS_stage_")
+
+  ; Only reached once a connect has already failed, so the stashed stage
+  ; belongs to that attempt. An unrecognised stage is treated as the handshake,
+  ; the stage that says the least about retrying.
+  (hidden connect-error)
+  (private connect-error)
+  (defn connect-error []
+    (let [stage (connect-stage-)]
+      (cond
+        (= stage 1) (TlsError.Resolve (error-))
+        (= stage 2) (TlsError.Connect (error-))
+        (TlsError.Handshake (error-)))))
+
+  (doc connect-classified
+    "connects to a remote host over TLS like `connect`, but says which stage
+failed. Returns `(Result TlsStream TlsError)`.
+
+`connect` cannot: name resolution, the TCP connection and the handshake all
+report through one error string, so a caller deciding whether to retry has
+only prose to go on.")
+  (defn connect-classified [host port]
     (let [s (connect- host port)]
-      (if (= (fd- &s) -1) (Result.Error (error-)) (Result.Success s))))
+      (if (= (fd- &s) -1) (Result.Error (connect-error)) (Result.Success s))))
+
+  (doc connect
+    "connects to a remote host over TLS. Returns `(Result TlsStream String)`.
+
+See `connect-classified` to tell resolution, connection and handshake
+failures apart.")
+  (defn connect [host port]
+    (match (connect-classified host port)
+      (Result.Success s) (Result.Success s)
+      (Result.Error e) (Result.Error (TlsError.message &e))))
 
   (doc send
     "sends a string over the TLS stream. Returns bytes sent or an error.")
