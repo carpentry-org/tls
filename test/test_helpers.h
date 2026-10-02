@@ -41,10 +41,15 @@ static int carp_test_generate_cert(void) {
   X509_gmtime_adj(X509_get_notAfter(x509), 3600);
   X509_set_pubkey(x509, pkey);
 
-  X509_NAME *name = X509_get_subject_name(x509);
+  /* OpenSSL 4 hands out the certificate's own name as const, so build one
+     and set it as both subject and issuer (self-signed) */
+  X509_NAME *name = X509_NAME_new();
+  if (!name) { X509_free(x509); EVP_PKEY_free(pkey); return -1; }
   X509_NAME_add_entry_by_txt(name, "CN", MBSTRING_ASC,
                               (const unsigned char *)"localhost", -1, -1, 0);
+  X509_set_subject_name(x509, name);
   X509_set_issuer_name(x509, name);
+  X509_NAME_free(name);
 
   if (X509_sign(x509, pkey, EVP_sha256()) <= 0) {
     X509_free(x509);

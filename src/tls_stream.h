@@ -99,6 +99,21 @@ static void carp_tls_capture_ssl_error(int ssl_err) {
   ERR_clear_error();
 }
 
+/* Name the peer the certificate must match. SSL_set1_host took a DNS name or
+   an IP literal; OpenSSL 4 deprecates it in favor of one setter per kind. */
+static int carp_tls_set_expected_peer(SSL *ssl, const char *host) {
+#if defined(OPENSSL_VERSION_MAJOR) && OPENSSL_VERSION_MAJOR >= 4 && \
+    !defined(LIBRESSL_VERSION_NUMBER)
+  unsigned char addr[sizeof(struct in6_addr)];
+  if (inet_pton(AF_INET, host, addr) == 1 ||
+      inet_pton(AF_INET6, host, addr) == 1)
+    return SSL_set1_ipaddr(ssl, host);
+  return SSL_set1_dnsname(ssl, host);
+#else
+  return SSL_set1_host(ssl, host);
+#endif
+}
+
 TlsStream TlsStream_connect_(String *host, int port) {
   TlsStream s;
   s.fd = -1;
@@ -160,7 +175,7 @@ TlsStream TlsStream_connect_(String *host, int port) {
 
   /* Enable hostname verification. If this fails we would still trust the chain
      but skip the name check (fail-open), so bail out instead. */
-  if (SSL_set1_host(ssl, *host) != 1) {
+  if (carp_tls_set_expected_peer(ssl, *host) != 1) {
     carp_tls_last_stage = CARP_TLS_STAGE_HANDSHAKE;
     carp_tls_set_error("could not enable hostname verification");
     SSL_free(ssl);
