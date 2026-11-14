@@ -21,6 +21,10 @@
   (Fn [Int &String] Int)
   "carp_test_fork_insecure_client")
 (register test-close-fd (Fn [Int] ()) "carp_test_close_fd")
+(register test-start-silent-server
+  (Fn [Int] Int)
+  "carp_test_start_silent_server")
+(register test-blocking? (Fn [&TlsStream] Bool) "carp_test_blocking")
 
 (defn https-get [host path]
   (match (TlsStream.connect host 443)
@@ -47,6 +51,29 @@
         (TlsError.Resolve _) @"resolve"
         (TlsError.Connect _) @"connect"
         (TlsError.Handshake _) @"handshake")))
+
+(defn tls-connect-timeout-str [host port timeout]
+  (match (TlsStream.connect-timeout-classified host port timeout)
+    (Result.Success s) (do (TlsStream.close s) @"connected")
+    (Result.Error e) (str &e)))
+
+(defn elapsed-ms [start]
+  (Long.to-int
+    (Uint64.to-long
+      (Uint64./ (Uint64.- (System.nanotime) start) (Uint64.from-long 1000000l)))))
+
+; The server hangs up after 5 s, so a broken timeout fails instead of hanging.
+(defn connect-to-silent-server []
+  (let [port (test-start-silent-server 5)]
+    (if (= port -1)
+      @"no server"
+      (let-do [start (System.nanotime)
+               outcome (tls-connect-timeout-str "127.0.0.1" port 1)
+               ms (elapsed-ms start)]
+        (test-cleanup)
+        (if (and (>= ms 900) (< ms 3000))
+          outcome
+          (fmt "%s after %d ms" &outcome ms))))))
 
 (deftest test
   (assert-true test
@@ -251,6 +278,49 @@
     "connect"
     &(tls-connect-kind "127.0.0.1" 9)
     "a resolvable host that refuses is a Connect error")
+
+  (assert-equal test
+    "TLS handshake failed: handshake timed out"
+    &(connect-to-silent-server)
+    "connect-timeout gives up on an unanswered handshake after about 1 s")
+
+  (assert-equal test
+    "cannot connect: Connection refused"
+    &(tls-connect-timeout-str "127.0.0.1" 9 1)
+    "connect-timeout to a resolvable host that refuses is a Connect error")
+
+  (assert-equal test
+    "cannot connect: timeout must be positive"
+    &(tls-connect-timeout-str "127.0.0.1" 9 0)
+    "connect-timeout rejects a zero timeout as a Connect error")
+
+  (assert-equal test
+    "cannot connect: timeout must be positive"
+    &(tls-connect-timeout-str "127.0.0.1" 9 -1)
+    "connect-timeout rejects a negative timeout as a Connect error")
+
+  (assert-true test
+    (match (TlsStream.connect-timeout "example.com" 443 10)
+      (Result.Success s)
+        (let-do [blocking (test-blocking? &s)] (TlsStream.close s) blocking)
+      _ false)
+    "connect-timeout to example.com:443 returns a blocking stream")
+
+  (assert-true test
+    (match (TlsStream.connect-timeout "example.com" 443 10)
+      (Result.Success s)
+        (do
+          (TlsStream.set-timeout &s 10)
+          (ignore
+            (TlsStream.send &s
+                            "GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n"))
+          (let-do [resp (the (Result String String) (TlsStream.read &s))]
+            (TlsStream.close s)
+            (match resp
+              (Result.Success body) (String.starts-with? &body "HTTP/1.1")
+              _ false)))
+      _ false)
+    "GET over a connect-timeout stream returns an HTTP response")
 
   (assert-true test
     (if (= (test-generate-cert) -1)

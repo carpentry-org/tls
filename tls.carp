@@ -59,7 +59,7 @@ is what separates a handshake failure from a connection failure.")
 (defmodule TlsStream
   (private connect-)
   (hidden connect-)
-  (register connect- (Fn [&String Int] TlsStream) "TlsStream_connect_")
+  (register connect- (Fn [&String Int Int] TlsStream) "TlsStream_connect_")
   (private fd-)
   (hidden fd-)
   (register fd- (Fn [&TlsStream] Int) "TlsStream_fd_")
@@ -119,7 +119,7 @@ failed. Returns `(Result TlsStream TlsError)`.
 report through one error string, so a caller deciding whether to retry has
 only prose to go on.")
   (defn connect-classified [host port]
-    (let [s (connect- host port)]
+    (let [s (connect- host port 0)]
       (if (= (fd- &s) -1) (Result.Error (connect-error)) (Result.Success s))))
 
   (doc connect
@@ -129,6 +129,32 @@ See `connect-classified` to tell resolution, connection and handshake
 failures apart.")
   (defn connect [host port]
     (match (connect-classified host port)
+      (Result.Success s) (Result.Success s)
+      (Result.Error e) (Result.Error (TlsError.message &e))))
+
+  (doc connect-timeout-classified
+    "connects like `connect-classified`, but gives up after `timeout` seconds.
+Returns `(Result TlsStream TlsError)`.
+
+The TCP connection to each resolved address and the handshake each get up to
+`timeout` seconds; name resolution is not bounded. Running out of time is a
+`Connect` error before the TCP connection is made and a `Handshake` error
+after. A `timeout` below 1 is a `Connect` error, returned before anything is
+resolved or sent. The returned stream is blocking, as after `connect`.")
+  (defn connect-timeout-classified [host port timeout]
+    (if (< timeout 1)
+      (Result.Error (TlsError.Connect @"timeout must be positive"))
+      (let [s (connect- host port timeout)]
+        (if (= (fd- &s) -1) (Result.Error (connect-error)) (Result.Success s)))))
+
+  (doc connect-timeout
+    "connects to a remote host over TLS like `connect`, but gives up after
+`timeout` seconds. Returns `(Result TlsStream String)`.
+
+See `connect-timeout-classified` for what the timeout covers and to tell the
+failures apart.")
+  (defn connect-timeout [host port timeout]
+    (match (connect-timeout-classified host port timeout)
       (Result.Success s) (Result.Success s)
       (Result.Error e) (Result.Error (TlsError.message &e))))
 

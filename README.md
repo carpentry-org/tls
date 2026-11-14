@@ -64,6 +64,7 @@ macOS with Homebrew: `brew install openssl`.
 | Function | Purpose |
 |----------|---------|
 | `TlsStream.connect host port` | Open a TLS connection. Returns `(Result TlsStream String)` |
+| `TlsStream.connect-timeout host port seconds` | Like `connect`, but the TCP connect and the handshake each give up after `seconds` |
 | `TlsStream.send stream msg` | Send a string. Returns `(Result Int String)` (bytes sent) |
 | `TlsStream.send-bytes stream data` | Send a byte array |
 | `TlsStream.read stream` | Read up to 4096 bytes as a string |
