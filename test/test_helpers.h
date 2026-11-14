@@ -273,6 +273,32 @@ void carp_test_close_fd(int fd) {
   if (fd >= 0) close(fd);
 }
 
+/* Fork a server that accepts one connection, never writes, and exits after
+   hold_sec. Returns the port, or -1; reaped by carp_test_cleanup. */
+int carp_test_start_silent_server(int hold_sec) {
+  int listen_fd = carp_test_listen();
+  if (listen_fd < 0) return -1;
+  int port = carp_test_listen_port;
+
+  pid_t pid = fork();
+  if (pid < 0) { close(listen_fd); return -1; }
+
+  if (pid == 0) {
+    int client_fd = carp_test_accept_tcp(listen_fd);
+    sleep(hold_sec);
+    _exit(client_fd < 0);
+  }
+
+  carp_test_server_pid = pid;
+  close(listen_fd);
+  return port;
+}
+
+bool carp_test_blocking(TlsStream *s) {
+  int flags = fcntl(s->fd, F_GETFL, 0);
+  return flags >= 0 && !(flags & O_NONBLOCK);
+}
+
 /* ---------------------------------------------------------------
    Cleanup
    --------------------------------------------------------------- */

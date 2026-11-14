@@ -7,9 +7,11 @@
 #include <netdb.h>
 #include <signal.h>
 #include <netinet/in.h>
+#include <poll.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/types.h>
+#include <time.h>
 #include <unistd.h>
 #include <fcntl.h>
 
@@ -114,7 +116,64 @@ static int carp_tls_set_expected_peer(SSL *ssl, const char *host) {
 #endif
 }
 
-TlsStream TlsStream_connect_(String *host, int port) {
+static long long carp_tls_now_ms(void) {
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return (long long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
+
+/* Waits for events on fd until deadline_ms; on failure errno says why. */
+static int carp_tls_wait(int fd, short events, long long deadline_ms) {
+  struct pollfd pfd = { .fd = fd, .events = events };
+  for (;;) {
+    long long left = deadline_ms - carp_tls_now_ms();
+    if (left <= 0) {
+      errno = ETIMEDOUT;
+      return 0;
+    }
+    int r = poll(&pfd, 1, left > INT_MAX ? INT_MAX : (int)left);
+    if (r > 0) return 1;
+    if (r < 0 && errno != EINTR) return 0;
+  }
+}
+
+/* Completes a non-blocking connect on fd; on failure errno says why. */
+static int carp_tls_finish_connect(int fd, int timeout_sec) {
+  if (errno != EINPROGRESS) return 0;
+  if (!carp_tls_wait(fd, POLLOUT, carp_tls_now_ms() + timeout_sec * 1000LL))
+    return 0;
+  int err = 0;
+  socklen_t len = sizeof(err);
+  if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &len) != 0) return 0;
+  errno = err;
+  return err == 0;
+}
+
+/* SSL_connect, bounded by timeout_sec when it is positive (fd must then be
+   non-blocking). Captures the error on failure. */
+static int carp_tls_handshake(SSL *ssl, int fd, int timeout_sec) {
+  long long deadline = carp_tls_now_ms() + timeout_sec * 1000LL;
+  for (;;) {
+    int rc = SSL_connect(ssl);
+    if (rc == 1) return 1;
+    int err = SSL_get_error(ssl, rc);
+    short want = err == SSL_ERROR_WANT_READ    ? POLLIN
+                 : err == SSL_ERROR_WANT_WRITE ? POLLOUT
+                                               : 0;
+    if (timeout_sec <= 0 || want == 0) {
+      carp_tls_capture_ssl_error(err);
+      return 0;
+    }
+    if (!carp_tls_wait(fd, want, deadline)) {
+      carp_tls_set_error(errno == ETIMEDOUT ? "handshake timed out"
+                                            : strerror(errno));
+      return 0;
+    }
+  }
+}
+
+/* A timeout_sec of 0 or less blocks, with no bound on either step. */
+TlsStream TlsStream_connect_(String *host, int port, int timeout_sec) {
   TlsStream s;
   s.fd = -1;
   s.ssl = NULL;
@@ -147,10 +206,16 @@ TlsStream TlsStream_connect_(String *host, int port) {
   }
 
   int fd = -1;
+  int flags = 0;
   for (rp = result; rp != NULL; rp = rp->ai_next) {
     fd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
     if (fd < 0) continue;
+    if (timeout_sec > 0) {
+      flags = fcntl(fd, F_GETFL, 0);
+      fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+    }
     if (connect(fd, rp->ai_addr, rp->ai_addrlen) == 0) break;
+    if (timeout_sec > 0 && carp_tls_finish_connect(fd, timeout_sec)) break;
     close(fd);
     fd = -1;
   }
@@ -183,14 +248,13 @@ TlsStream TlsStream_connect_(String *host, int port) {
     return s;
   }
 
-  int rc = SSL_connect(ssl);
-  if (rc != 1) {
+  if (!carp_tls_handshake(ssl, fd, timeout_sec)) {
     carp_tls_last_stage = CARP_TLS_STAGE_HANDSHAKE;
-    carp_tls_capture_ssl_error(SSL_get_error(ssl, rc));
     SSL_free(ssl);
     close(fd);
     return s;
   }
+  if (timeout_sec > 0) fcntl(fd, F_SETFL, flags);
 
   s.fd = fd;
   s.ssl = ssl;
